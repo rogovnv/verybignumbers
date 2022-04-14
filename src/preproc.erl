@@ -13,12 +13,13 @@
 callback_mode() ->
   state_functions.
 
-start({Pid, Id}) ->
-  gen_statem:start(?MODULE, {Pid, Id}, []).
+start({MasterPid, VarPid, StringId}) ->
+  gen_statem:start(?MODULE, {MasterPid, VarPid, StringId}, []).
 
-init({Pid, Id}) ->
+init({MasterPid, VarPid, StringId}) ->
   process_flag(trap_exit, true),
-  gen_server:cast(Pid, Id),
+  Str=gen_server:call(VarPid, {gets, StringId}),
+
   {ok, undef, []}.
 
 

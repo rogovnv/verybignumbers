@@ -10,7 +10,7 @@
 -export([start/0, stop/1, setvar/3, getvar/2, get_task_str/2, set_task_str/2]).
 
 start() ->
-  gen_server:start_link(?MODULE, [], []).
+  gen_server:start(?MODULE, [], []).
 
 stop(Pid) ->
   gen_server:cast(Pid, stop).

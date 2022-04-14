@@ -9,7 +9,7 @@
 -export([start/0, getnum/2, add/2, stop/1]).
 
 start() ->
-  gen_server:start_link(?MODULE, [], []).
+  gen_server:start(?MODULE, [], []).
 
 getnum(Pid, N) ->
   gen_server:call(Pid, {get, N}).%%control in external data list length
