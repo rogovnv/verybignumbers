@@ -10,7 +10,7 @@
 %% undef - initial state, takes variable and = sign
 %% oper - state for operator
 %% oper - get and normalize number
-%% lbr rbr - bracker handlers
+%% lbr rbr - bracket handlers
 
 
 callback_mode() ->
@@ -38,9 +38,8 @@ init({VarPid, StringId}) ->
   Ins=lists:flatten(lists:sort(fun({A, _C}, {B, _D}) -> B>A end, Varv++NegNv++PosNv)),
   Insert=[F||{_, F}<-Ins],
 
-  %% Str4 is AOut
   {ok, undef, {VarPid, Str4, Insert, [], 0, StringId}, [{next_event, internal, []}]}.
-%% Data is: VarPid curent Pid on global data for task
+%% State is: VarPid curent Pid on global data for task
 %% Str4&Insert original task string,
 %% Aout [] output in erlang terms ({v|n, Var or nmber of Number} | operator | brackets)
 %% Bracket number and sequence of l and r brackets
@@ -183,27 +182,37 @@ perform_num(VarPid, Num) ->
       list_to_integer(lists:flatten(lists:nth(Split, 1)++D));
     3 ->%% calculate and keep in mind dot pos
       F=lists:nth(Split, 2),%% numbers after dot
-      L=length(F),
+      L=length(lists:nth(Split, 1)),
       R=list_to_integer(lists:nth(Split, 3)),%% exp
-      Med=lists:nth(Split, 1)++F,
-      L1=length(Med),
-      if
-        R >= 0 ->
-          if
-            R-L+Range>=0 ->
-              Med2=Med++lists:duplicate(R-L+Range, $0);
-            true ->
-              Med2=lists:sublist(Med, 0, L1-R+L-Range)
-          end;
-          true ->
-            if
-              -R+L >= Range ->
-                Med2=lists:duplicate(-R, $0)++lists:sublist(Med, 0, L1-(-R+L-Range));
-              true ->
-                Med2=lists:duplicate(-R, $0)++Med
-            end
-      end,
-      list_to_integer(lists:flatten(Med2))
+      Med=lists:nth(Split, 1)++F++lists:duplicate(Range, $0),
+      %%L1=length(Med),
+      D=L+R,
+      Dot= if
+             D<0 ->
+               Med2=lists:duplicate(-D, $0)++Med,
+               0;
+             true ->
+               Med2=Med,
+               D
+           end,
+      list_to_integer(lists:sublist(lists:flatten(Med2), 0, Dot+Range))
+      %%if
+      %%  R >= 0 ->
+      %%    if
+      %%      R-L+Range>=0 ->
+      %%        Med2=Med++lists:duplicate(R-L+Range, $0);
+      %%      true ->
+      %%        Med2=lists:sublist(Med, 0, L1-R+L-Range)
+      %%    end;
+      %%  true ->
+      %%    if
+      %%      -R+L >= Range ->
+      %%        Med2=lists:duplicate(-R, $0)++lists:sublist(Med, 0, L1-(-R+L-Range));
+      %%      true ->
+      %%        Med2=lists:duplicate(-R, $0)++Med
+      %%    end
+      %%end,
+      %%list_to_integer(lists:flatten(Med2))
   end.
 
 replacevar(Str, []) ->
@@ -212,6 +221,7 @@ replacevar(Str, Vars) ->
   {_, Z}=hd(Vars),
   F=re:replace(Str, Z, "v", [{return, list}]),
   replacevar(F, tl(Str)).
+
 
 
 
