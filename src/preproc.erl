@@ -151,7 +151,7 @@ oper(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) ->
     Data ==$+ orelse Data ==$- orelse Data ==$* orelse Data ==$/ ->
       {next_state, rbr, {VarPid, T, Ins, Aout++Data, LRBr, SId}, [{next_event, internal, H}]};
     Data ==$) ->
-      {keep_state, {VarPid, T, Ins, Aout++Data, LRBr, SId}, [{next_event, internal, H}]};
+      {keep_state, {VarPid, T, Ins, Aout++Data, LRBr-1, SId}, [{next_event, internal, H}]};
     true ->
       MP=gen_server:call(VarPid, master),
       gen_server:reply(MP, {SId, wrong_oper}),
@@ -185,7 +185,6 @@ perform_num(VarPid, Num) ->
       L=length(lists:nth(Split, 1)),
       R=list_to_integer(lists:nth(Split, 3)),%% exp
       Med=lists:nth(Split, 1)++F++lists:duplicate(Range, $0),
-      %%L1=length(Med),
       D=L+R,
       Dot= if
              D<0 ->
@@ -196,23 +195,6 @@ perform_num(VarPid, Num) ->
                D
            end,
       list_to_integer(lists:sublist(lists:flatten(Med2), 0, Dot+Range))
-      %%if
-      %%  R >= 0 ->
-      %%    if
-      %%      R-L+Range>=0 ->
-      %%        Med2=Med++lists:duplicate(R-L+Range, $0);
-      %%      true ->
-      %%        Med2=lists:sublist(Med, 0, L1-R+L-Range)
-      %%    end;
-      %%  true ->
-      %%    if
-      %%      -R+L >= Range ->
-      %%        Med2=lists:duplicate(-R, $0)++lists:sublist(Med, 0, L1-(-R+L-Range));
-      %%      true ->
-      %%        Med2=lists:duplicate(-R, $0)++Med
-      %%    end
-      %%end,
-      %%list_to_integer(lists:flatten(Med2))
   end.
 
 replacevar(Str, []) ->
@@ -220,7 +202,7 @@ replacevar(Str, []) ->
 replacevar(Str, Vars) ->
   {_, Z}=hd(Vars),
   F=re:replace(Str, Z, "v", [{return, list}]),
-  replacevar(F, tl(Str)).
+  replacevar(F, tl(Vars)).
 
 
 

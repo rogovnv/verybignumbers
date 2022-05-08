@@ -9,7 +9,6 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/1, stop/1, setvar/3, getvar/2, get_task_str/2, set_task_str/2, getrange/1, getmaster/1]).
 -export([initv/2, is_existv/2]).
--export([setnum/2, getnum/2]).
 
 start({Prange, MasterPid}) ->
   gen_server:start(?MODULE, [{Prange, MasterPid}], []).
