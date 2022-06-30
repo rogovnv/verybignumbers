@@ -14,7 +14,7 @@ start({Prange, MasterPid}) ->
   gen_server:start(?MODULE, {Prange, MasterPid}, []).
 
 stop(Pid) ->
-  gen_server:stop(Pid).
+  gen_server:cast(Pid, stop).
 
 init({Prange, MasterPid}) ->
   ListStr=#{},
@@ -47,10 +47,10 @@ is_existv(Pid, Vname) ->
   gen_server:call(Pid, {is_existv, Vname}).
 
 handle_call({is_existv, Vname}, _From, {M, L, N, Pr, MP}) ->
-  P=map_get(Vname, M),
+  P=maps:is_key(Vname, M),
   Out = case P of
-    {badkey, _} -> badkey;
-    _ -> true
+    false -> badkey;
+    true -> true
   end,
   {reply, Out, {M, L, N, Pr, MP}};
 
@@ -81,15 +81,11 @@ handle_cast({initv, Vname}, {M, L, N, Pr, MP}) ->
   M2=maps:put(Vname, 0, M),
    {noreply, {M2, L, N, Pr, MP}};
 
-handle_cast(normal, Data) ->
-  {stop, normal, Data};
+handle_cast(stop, Data) ->
+  {stop, normal, Data}.
 
-handle_cast(Any, Data) ->
-  io:format("~nVar got cast ~p~n", [Any]),
-  {noreply, Data}.
-
-handle_info(Any, Data) ->
-  io:format("~nVar got info ~p~n", [Any]),
+handle_info(_Any, Data) ->
+  %% io:format("~nVar got info ~p~n", [Any]),
   {noreply, Data}.
 
 terminate(_Reason, _Data) ->

@@ -12,53 +12,65 @@
 %% API
 -export([bfun/1, uminus/1]).
 
-bfun({X, Y, VarPid, Op, Range}) ->
-  F=fun({A, B}) ->
-    case A of
-      v -> gen_server:call(VarPid, {get, B});
-      f ->
-        My=self(),
-        B ! {get, My},
-        receive
-          {My, Data} -> Data
-        end;
-      n -> B
-    end
-    end,
-  FS=fun({A, B}) ->
-    case A of
-      f ->
-        B ! stop;
-      _Other -> ok
-    end
-    end,
+bfun({{A, B}, {C, D}, VarPid, Op, Range}) ->
+  My=self(),
   receive
     {get, Pid} ->
-      P=F(X),
-      Q=F(Y),
+      P=case A of
+          v -> var:getvar(VarPid, B);
+          f ->
+            B ! {get, My},
+            receive
+              {My, Data} -> Data
+            end;
+          n -> B
+        end,
+      Q=case C of
+          v -> var:getvar(VarPid, D);
+          f ->
+            D ! {get, My},
+            receive
+              {My, Ddata} -> Ddata
+            end;
+          n -> D
+        end,
       Answer=case Op of
                $* ->
                  (P*Q) div Range;
                $/ ->
-                 (P*Range) div Q;
+                 case Q of% division by zero
+                   0 ->
+                     var:initv(VarPid, "zero"),
+                     0;
+                   _Other ->
+                     (P*Range) div Q
+                 end;
                $+ ->
                  P+Q;
                $- ->
                  P-Q
              end,
       Pid ! {Pid, Answer},
-      bfun({X, Y, VarPid, Op, Range});
+      bfun({{A, B}, {C, D}, VarPid, Op, Range});
     stop ->
-      FS(X),
-      FS(Y),
-      bfun({X, Y, VarPid, Op, Range})
+      if
+        A==f ->
+          B ! stop;
+        true -> ok
+      end,
+      if
+        C==f ->
+          D ! stop;
+        true -> ok
+      end,
+bfun({{A, B}, {C, D}, VarPid, Op, Range})
   end.
 
 uminus({{What, M}, VarPid}) ->
   receive
     {get, Pid} ->
       Answer=case What of
-               v -> {Pid, -gen_server:call(VarPid, {get, M})};
+               v -> {Pid, -var:getvar(VarPid, M)};
                f ->
                  My=self(),
                  M ! {get, My},

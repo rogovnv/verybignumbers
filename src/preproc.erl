@@ -30,7 +30,7 @@ terminate(_Reason, _State, _Data) ->
 
 init({VarPid, StringId}) ->
   process_flag(trap_exit, true),
-  Str=gen_server:call(VarPid, {gets, StringId}),
+  Str=var:get_task_str(VarPid, StringId),
   {ok, afterinit, {VarPid, StringId}, [{next_event, internal, [Str]}]}.
 
 %% State is: VarPid curent Pid on global data for task
@@ -79,14 +79,14 @@ afterinit(internal, Strr, {VarPid, StringId}) ->
   WrongDoubleVname=lists:member({v, Vn}, tl(Insert)),
   case WrongDoubleVname of
     true ->
-      MP=gen_server:call(VarPid, master),
+      MP=var:getmaster(VarPid),
       gen_server:cast(MP, {StringId, wrong_double_vname}),
       keep_state_and_data;
     false ->
       {next_state, undef, {VarPid, Str4, Insert, [], 0, StringId}, [{next_event, internal, []}]}
   end;
 
-afterinit(cast, normal, Data) ->
+afterinit(cast, stop, Data) ->
   {stop, normal, Data}.
 
 undef(internal, _Data, {VarPid, Str, Ins, [], LRBr, SId}) ->
@@ -97,21 +97,21 @@ undef(internal, _Data, {VarPid, Str, Ins, [], LRBr, SId}) ->
   R=Bool and Booool,
   case R of
     true ->
-      gen_server:cast(VarPid, {initv, B}),
+      var:initv(VarPid, B),
       [P|Str2]=T2,
       {next_state, lbr, {VarPid, Str2, Ins2, [{A, B}, Z], LRBr, SId}, [{next_event, internal, P}]};%% eq symbol fired
     _ ->
-      MP=gen_server:call(VarPid, master),
+      MP=var:getmaster(VarPid),
       gen_server:cast(MP, {SId, wrong_begin}),
       keep_state_and_data
   end;
 
-undef(cast, normal, Data) ->
+undef(cast, stop, Data) ->
   {stop, normal, Data}.
 
 %% left bracket, keepstate
 lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $(->
-  MP=gen_server:call(VarPid, master),
+  MP=var:getmaster(VarPid),
   if
     LRBr >= 0 ->
       [H|T]=Str,
@@ -156,7 +156,7 @@ lbr(internal, Data, {VarPid, [], Ins, Aout, LRBr, SId}) when Data == $v ->
       Bool=gen_server:call(VarPid, {is_existv, Vname}),
       case Bool of
         badkey ->
-          MP=gen_server:call(VarPid, master),
+          MP=var:getmaster(VarPid),
           gen_server:cast(MP, {SId, wrong_lvar}),
           keep_state_and_data;
         _ ->
@@ -175,7 +175,7 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $v ->
       Bool=gen_server:call(VarPid, {is_existv, Vname}),
       case Bool of
         badkey ->
-          MP=gen_server:call(VarPid, master),
+          MP=var:getmaster(VarPid),
           gen_server:cast(MP, {SId, wrong_lvar}),
           keep_state_and_data;
         _ ->
@@ -186,7 +186,7 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $v ->
 lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $- ->
   B=lists:nth(length(Aout), Aout),
   Bool=B==$= orelse B==$(,
-  MP=gen_server:call(VarPid, master),
+  MP=var:getmaster(VarPid),
   case Bool of
     true ->
       [H|T]=Str,
@@ -216,11 +216,11 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $- ->
 
 %% wrong symbol
 lbr(internal, _Data, {VarPid, _Str, _Ins , _Aout, _LRBr, SId}) ->
-  MP=gen_server:call(VarPid, master),
+  MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, bad_number}),
   keep_state_and_data;
 
-lbr(cast, normal, Data) ->
+lbr(cast, stop, Data) ->
   {stop, normal, Data}.
 
 rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $- ->
@@ -256,10 +256,10 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data ==$v ->
       HIns={n, handle_num(VarPid, Num)},
       {next_state, oper, {VarPid, T, TI, [Aout,HIns], LRBr, SId}, [{next_event, internal, H}]};
     {v, Vname} -> %% var
-      Bool=gen_server:call(VarPid, {is_existv, Vname}),
+      Bool=var:is_existv(VarPid, Vname),
       case Bool of
         badkey ->
-          MP=gen_server:call(VarPid, master),
+          MP=var:getmaster(VarPid),
           gen_server:cast(MP, {SId, wrong_rvar}),
           keep_state_and_data;
         _ ->
@@ -267,11 +267,11 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data ==$v ->
       end
   end;
 
-rbr(cast, normal, Data) ->
+rbr(cast, stop, Data) ->
   {stop, normal, Data}.
 %% Answer
 oper(internal, Data, {VarPid, [], _Ins, Aout, _LRBr, SId})  when Data == " "  ->
-  MP=gen_server:call(VarPid, master),
+  MP=var:getmaster(VarPid),
   StrId=gen_server:call(VarPid, {sets, lists:flatten(Aout)}),
   gen_server:cast(MP, {SId, StrId}),
   keep_state_and_data;
@@ -296,15 +296,15 @@ oper(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $( ->
   {next_state, lbr, {VarPid, T, Ins, [Aout,Data], LRBr+1, SId}, [{next_event, internal, H}]};
 
 oper(internal, _Data, {VarPid, _Ins, _Str, _Aout, _LRBr, SId}) ->
-  MP=gen_server:call(VarPid, master),
+  MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, wrong_oper}),
   keep_state_and_data;
 
-oper(cast, normal, Data) ->
+oper(cast, stop, Data) ->
   {stop, normal, Data}.
 
 handle_num(VarPid, Num) ->
-  Range=gen_server:call(VarPid, range),
+  Range=var:getrange(VarPid),
   Split=re:split(Num, "[.e]", [{return, list}]),
   case length(Split) of
     1 ->
