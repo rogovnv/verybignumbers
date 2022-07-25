@@ -48,10 +48,9 @@ afterinit(internal, Strr, {VarPid, StringId}) ->
   {match, Vara}=re:run(Str, "[A-Z|_]+", [global]),
   Varb=lists:flatten(Vara),
   Varv=[{X+1, {v,lists:sublist(Str, X+1, Y)}}|| {X, Y} <- Varb],
-  %% Varv=funV(Varb, lists:flatten(Str)),
   %% extract negative numbers(with unary minus)
   {Str2, Extract}=replacevar(Str, Varv, Str),
-  N=re:run(Extract, "[-+*/=(]-[0-9]+.[0-9]+e[0-9]+|[-+*/=(]-[0-9]+.[0-9]+|[-+*/=(]-[0-9]+", [global]),
+  N=re:run(Extract, "[-+*/=(]-[0-9]+\\.[0-9]+e[0-9]+|[-+*/=(]-[0-9]+\\.[0-9]+|[-+*/=(]-[0-9]+", [global]),
   {Negv, {Str3, Extract2}}=case N of
                              {match, NegN} ->
                                   E=lists:flatten(NegN),
@@ -62,7 +61,7 @@ afterinit(internal, Strr, {VarPid, StringId}) ->
                                   {[],{Str2, Extract}}
                               end,
   %% extract positive numbers
-  R=re:run(Extract2, "[0-9]+.[0-9]+e[0-9]+|[0-9]+.[0-9]+|[0-9]+", [global]),
+  R=re:run(Extract2, "[0-9]+\\.[0-9]+e[0-9]+|[0-9]+\\.[0-9]+|[0-9]+", [global]),
   {Posv, Str4}= case R of
                   {match, Posa} ->
                         Posb=lists:flatten(Posa),
@@ -77,7 +76,9 @@ afterinit(internal, Strr, {VarPid, StringId}) ->
   %%if header and body has same vname
   {v, Vn}=hd(Insert),
   WrongDoubleVname=lists:member({v, Vn}, tl(Insert)),
-  case WrongDoubleVname of
+  Bool_bound=var:is_existv(VarPid, Vn)==true,
+  Wrong_bound=WrongDoubleVname and (not Bool_bound),
+  case Wrong_bound of
     true ->
       MP=var:getmaster(VarPid),
       gen_server:cast(MP, {StringId, wrong_double_vname}),
@@ -249,7 +250,10 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $( ->
   {next_state, lbr, {VarPid, T, Ins, [Aout,Data], LRBr+1, SId}, [{next_event, internal, H}]};
 
 rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data ==$v ->
-  [H|T]=Str,
+  [H|T]= case Str of
+           [] -> [[]|[]];
+           _Other -> Str
+         end,
   [{A, B}|TI]=Ins,
   case {A, B} of
     {n, Num} ->
@@ -269,6 +273,13 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data ==$v ->
 
 rbr(cast, stop, Data) ->
   {stop, normal, Data}.
+%% Answer
+oper(internal, Data, {VarPid, [], _Ins, Aout, _LRBr, SId})  when Data == []  ->
+  MP=var:getmaster(VarPid),
+  StrId=gen_server:call(VarPid, {sets, lists:flatten(Aout)}),
+  gen_server:cast(MP, {SId, StrId}),
+  keep_state_and_data;
+
 %% Answer
 oper(internal, Data, {VarPid, [], _Ins, Aout, _LRBr, SId})  when Data == " "  ->
   MP=var:getmaster(VarPid),
@@ -325,13 +336,11 @@ handle_num(VarPid, Num) ->
       R=list_to_integer(lists:nth(3, Split)),%% exp
       Med=lists:nth(1, Split)++F++lists:duplicate(Range, $0),
       D=L+R,
-      Dot= if
+      {Med2, Dot}= if
              D<0 ->
-               Med2=lists:duplicate(-D, $0)++Med,
-               0;
+               {lists:duplicate(-D, $0)++Med, 0};
              true ->
-               Med2=Med++lists:duplicate(R, $0),
-               D
+               {Med++lists:duplicate(R, $0), D}
            end,
       list_to_integer(lists:sublist(lists:flatten(Med2), 1, Dot+Range))
   end.

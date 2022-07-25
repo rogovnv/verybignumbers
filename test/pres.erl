@@ -1,10 +1,23 @@
 -module(pres).
--export([tryme/0]).
+-export([tryme/0, tryth/0]).
+
+tryth() ->
+	Me=self(),
+	Fpath="/media/download/test/task1.txt",
+	{ok, VP}=gen_server:start(var, 3, []),
+	{ok, Pid}=gen_statem:start(task_handler, {Me, VP, Fpath, 1}, []),
+	var:setmp(VP, Pid),
+	Aout=receive
+		Data -> Data
+	end,
+	io:format("~n~p~n", [Aout]),
+	gen_statem:stop(Pid),
+	gen_server:stop(VP).
 
 tryme() ->
-	L2="GG_RR=100",
+	L2="GG_RR=100.1",
 	L3="FF=-(100+-100)*-100+(GG_RR+-RRF)",
-	L1="RRF=-(1.1+-1.1)*1.1+1.1/(1.1+1.1)",% 0.5 eq 500
+	L1="RRF=-(1.1+-1.1)*1.1+1.1/(1.1+1.1)-(1.1-1.1)+(123-123)",% 0.5 eq 500
 	Range=3,
 	Me=self(),
 	{_, VP}=gen_server:start(var, {Range, Me}, []),
