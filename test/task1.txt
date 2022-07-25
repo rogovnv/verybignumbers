@@ -1,0 +1,15 @@
+R=3 A=(FF, AA, GG_TY)
+B=4
+C=2
+AA=0
+ZERO=0
+FF=78.5
+D=(18-4)+12/-B
+?AA=<C
+AA=AA+1
+?
+??
+AA=AA-1
+??AA>ZERO
+GG_TY=AA+FF*-2
+
