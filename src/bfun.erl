@@ -70,6 +70,7 @@ uminus({{What, M}, VarPid}) ->
   receive
     {get, Pid} ->
       Answer=case What of
+               n -> {Pid, -M};
                v -> {Pid, -var:getvar(VarPid, M)};
                f ->
                  My=self(),

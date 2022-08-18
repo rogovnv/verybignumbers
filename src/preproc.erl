@@ -81,7 +81,7 @@ afterinit(internal, Strr, {VarPid, StringId}) ->
   case Wrong_bound of
     true ->
       MP=var:getmaster(VarPid),
-      gen_server:cast(MP, {StringId, wrong_double_vname}),
+      gen_server:cast(MP, {StringId, {error, wrong_double_vname}}),
       keep_state_and_data;
     false ->
       {next_state, undef, {VarPid, Str4, Insert, [], 0, StringId}, [{next_event, internal, []}]}
@@ -103,7 +103,7 @@ undef(internal, _Data, {VarPid, Str, Ins, [], LRBr, SId}) ->
       {next_state, lbr, {VarPid, Str2, Ins2, [{A, B}, Z], LRBr, SId}, [{next_event, internal, P}]};%% eq symbol fired
     _ ->
       MP=var:getmaster(VarPid),
-      gen_server:cast(MP, {SId, wrong_begin}),
+      gen_server:cast(MP, {SId, {error, wrong_begin}}),
       keep_state_and_data
   end;
 
@@ -130,18 +130,18 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $(->
                 false ->
                   {keep_state, {VarPid, T1, Ins, [Aout,"(", H], LRBr+1, SId}, [{next_event, internal, H1}]};
                 true ->
-                  gen_server:cast(MP, {SId, too_much_minuses}),
+                  gen_server:cast(MP, {SId, {error, too_much_minuses}}),
                   keep_state_and_data
               end;
             false ->
-              gen_server:cast(MP, {SId, wrong_uminus}),
+              gen_server:cast(MP, {SId, {error, wrong_uminus}}),
               keep_state_and_data
           end;
         _ ->
           {keep_state, {VarPid, T, Ins, [Aout,"("], LRBr+1, SId}, [{next_event, internal, H}]}
       end;
     true ->
-      gen_server:cast(MP, {SId, wrong_bracket}),
+      gen_server:cast(MP, {SId, {error, wrong_bracket}}),
       keep_state_and_data
   end;
 
@@ -158,7 +158,7 @@ lbr(internal, Data, {VarPid, [], Ins, Aout, LRBr, SId}) when Data == $v ->
       case Bool of
         badkey ->
           MP=var:getmaster(VarPid),
-          gen_server:cast(MP, {SId, wrong_lvar}),
+          gen_server:cast(MP, {SId, {error, wrong_lvar}}),
           keep_state_and_data;
         _ ->
           {next_state, oper, {VarPid, [], TI, [Aout,{A, B}], LRBr, SId}, [{next_event, internal, " "}]}
@@ -177,7 +177,7 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $v ->
       case Bool of
         badkey ->
           MP=var:getmaster(VarPid),
-          gen_server:cast(MP, {SId, wrong_lvar}),
+          gen_server:cast(MP, {SId, {error, wrong_lvar}}),
           keep_state_and_data;
         _ ->
           {next_state, oper, {VarPid, T, TI, [Aout,{A, B}], LRBr, SId}, [{next_event, internal, H}]}
@@ -202,16 +202,16 @@ lbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $- ->
             false ->
               {keep_state, {VarPid, T, Ins, [Aout,$-], LRBr, SId}, [{next_event, internal, H}]};
             true ->
-              gen_server:cast(MP, {SId, too_much_minuses}),
+              gen_server:cast(MP, {SId, {error, too_much_minuses}}),
               keep_state_and_data
           end;
         false ->
-          gen_server:cast(MP, {SId, wrong_uminus}),
+          gen_server:cast(MP, {SId, {error, wrong_uminus}}),
           keep_state_and_data
       end;
       %% {keep_state, {VarPid, T, Ins, [Aout,"-"], LRBr, SId}, [{next_event, internal, H}]};
     false ->
-      gen_server:cast(MP, {SId, wrong_uminus}),
+      gen_server:cast(MP, {SId, {error, wrong_uminus}}),
       keep_state_and_data
   end;
 
@@ -236,11 +236,11 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $- ->
         false -> %% variable eg. S*-E
           {keep_state, {VarPid, T, Ins, [Aout,"-"], LRBr, SId}, [{next_event, internal, H}]};
         true ->
-          gen_server:cast(MP, {SId, too_much_minuses}),
+          gen_server:cast(MP, {SId, {error, too_much_minuses}}),
           keep_state_and_data
       end;
     false ->
-      gen_server:cast(MP, {SId, wrong_uminus}),
+      gen_server:cast(MP, {SId, {error, wrong_uminus}}),
       keep_state_and_data
   end;
 
@@ -264,7 +264,7 @@ rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data ==$v ->
       case Bool of
         badkey ->
           MP=var:getmaster(VarPid),
-          gen_server:cast(MP, {SId, wrong_rvar}),
+          gen_server:cast(MP, {SId, {error, wrong_rvar}}),
           keep_state_and_data;
         _ ->
           {next_state, oper, {VarPid, T, TI, [Aout,{A, B}], LRBr, SId}, [{next_event, internal, H}]}
@@ -308,7 +308,7 @@ oper(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId}) when Data == $( ->
 
 oper(internal, _Data, {VarPid, _Ins, _Str, _Aout, _LRBr, SId}) ->
   MP=var:getmaster(VarPid),
-  gen_server:cast(MP, {SId, wrong_oper}),
+  gen_server:cast(MP, {SId, {error, wrong_oper}}),
   keep_state_and_data;
 
 oper(cast, stop, Data) ->

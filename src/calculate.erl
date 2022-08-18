@@ -12,16 +12,17 @@
 %% APIio:format("~n ~n"),
 -behaviour(gen_statem).
 -export([callback_mode/0, start/1, init/1]).
--export([handle_event/4, terminate/3]).
+-export([extract/3, get_br/3, muldiv/3, exe/3, terminate/3]).
 
 
 callback_mode() ->
-  handle_event_function.
+  state_functions.
 
 start({VarPid, StringId}) ->
   gen_statem:start(?MODULE, {VarPid, StringId}, []).
 
 terminate(_Reason, _State, _Data) ->
+
   ok.
 
 init({VarPid, SId}) ->
@@ -35,36 +36,40 @@ init({VarPid, SId}) ->
 %% muldiv each iteration creating {f, FunPid} instead of (a operator b), where operator is * / + -
 
 %% corner case 1
-handle_event(internal, _, extract, {[{v, Vname}, $=, {Type, Val}], SId, VarPid}) ->
+extract(internal, _, {[{v, Vname}, $=, {Type, Val}], SId, VarPid}) ->
   MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, ok}),
   {next_state, exe, {[{v, Vname}, $=, {Type, Val}], SId, VarPid}};
 
 %% corner case 1 neg
-handle_event(internal, _, extract, {[{v, Vname}, $=, $-, {v, Val}], SId, VarPid}) ->
+extract(internal, _, {[{v, Vname}, $=, $-, {v, Val}], SId, VarPid}) ->
   S=spawn(bfun, uminus, {{v, Val}, VarPid}),
   MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, ok}),
   {next_state, exe, {[{v, Vname}, $=, $-, {f, S}], SId, VarPid}};
 
-handle_event(internal, _, extract, {Str, SId, VarPid}) ->
+extract(internal, _, {Str, SId, VarPid}) ->
   L=u_minus(Str, [], v, VarPid),
   LBr=get_lbr(L), %% backward order is normal
   R=list_to_integer("1"++lists:duplicate(gen_server:call(VarPid, range), $0)),
   {next_state, get_br, {R, L, SId, VarPid, LBr}, [{next_event, internal, []}]};
 
+extract(cast, stop, State) ->
+  {stop, normal, State}.
+
 %% catch 1
-handle_event(internal, _, get_br, {_R, [{v, Vname}, $=, {What, S}], SId, VarPid, []})  ->
+get_br(internal, _, {_R, [{v, Vname}, $=, {What, S}], SId, VarPid, []})  ->
   %% to Master
   MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, ok}),
   {next_state, exe, {{v, Vname}, $=, {What, S}, SId, VarPid}};
 
-handle_event(internal, _, get_br, {R, Str, SId, VarPid, LBr}) ->%cut string
+get_br(internal, _, {R, Str, SId, VarPid, LBr}) ->%cut string
   Str1=u_minus(Str, [], f, VarPid),
   case LBr of
     [] -> % no braces
-      {next_state, muldiv, {R, [], SId, VarPid, LBr, Str1}, [{next_event, internal, $*}]};
+      Str2=reverse_minus(Str1, VarPid),
+      {next_state, muldiv, {R, [], SId, VarPid, LBr, Str2}, [{next_event, internal, $*}]};
     _Other ->
       Hlbr=hd(LBr),
       RBr=get_rbr(Str1, 1, 0),
@@ -72,10 +77,14 @@ handle_event(internal, _, get_br, {R, Str, SId, VarPid, LBr}) ->%cut string
       L=lists:sublist(Str, Hlbr, Len),
       L2=L--"()",
       Str2=lists:flatten([lists:sublist(Str1, 1, Hlbr-1), lists:sublist(Str1, RBr+1, length(Str1)-RBr)]),
-      {next_state, muldiv, {R, Str2, SId, VarPid, LBr, L2}, [{next_event, internal, $*}]}
+      L3=reverse_minus(L2, VarPid),
+      {next_state, muldiv, {R, Str2, SId, VarPid, LBr, L3}, [{next_event, internal, $*}]}
   end;
 
-handle_event(internal, Op, muldiv, {R, Str, SId, VarPid, LBr, L}) ->
+get_br(cast, stop, State) ->
+  {stop, normal, State}.
+
+muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L}) ->
   %% general handling of * / + -
   BoolM=lists:member(Op, L), %% * / + -
   case BoolM of
@@ -116,7 +125,13 @@ handle_event(internal, Op, muldiv, {R, Str, SId, VarPid, LBr, L}) ->
       end
   end;
 
-handle_event(cast, get, exe, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
+muldiv(cast, stop, State) ->
+  {stop, normal, State}.
+
+exe(cast, stop, {Str, SId, VP, Vname}) ->
+  {stop, normal, {Str, SId, VP, Vname}};
+
+exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
   Answer=case What of
            n ->
               Val;
@@ -136,9 +151,9 @@ handle_event(cast, get, exe, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
   end,
   keep_state_and_data;
 
-handle_event(cast, stop, _Any, {Str, SId, VP, Vname}) ->
+exe(cast, stop, {Str, SId, VarPid}) ->
   clear_data(Str),
-  {stop, normal, {Str, SId, VP, Vname}}.
+  {stop, normal, {Str, SId, VarPid}}.
 
 get_lbr(Str)->
   ex(Str, [], 1).
@@ -157,8 +172,14 @@ u_minus([A|T], Acc, What, VarPid) -> u_minus(T,[A|Acc], What, VarPid);
 u_minus([], Acc, _What, _VarPid) -> lists:reverse(lists:flatten([Acc])).
 
 chg_pair([{X, A}, Sym, {Y, B}|T], Sym, Acc, VarPid, Range) ->
-  S=spawn(bfun, bfun, [{{X, A}, {Y, B}, VarPid, Sym, Range}]),
-  chg_pair(T, Sym, [{f,S},Acc], VarPid, Range);
+  S=case Sym of
+      $- ->
+        Med=spawn(bfun, uminus, [{{Y, B}, VarPid}]),
+        spawn(bfun, bfun, [{{X, A}, {f, Med}, VarPid, $+, Range}]);
+      _Other ->
+        spawn(bfun, bfun, [{{X, A}, {Y, B}, VarPid, Sym, Range}])
+    end,
+  chg_pair(T, Sym, [{f,S}|Acc], VarPid, Range);
 chg_pair([H|T], Sym, Acc, VarPid, Range) ->
   chg_pair(T, Sym, [H|Acc], VarPid, Range);
 chg_pair([], _Sym, Acc, _VarPid, _Range) ->
@@ -189,3 +210,14 @@ get_answer(Pid) ->
                  Data -> Data
                end,
   Answer.
+
+reverse_minus(L, VP) ->
+  rm_(L, VP, []).
+
+rm_([{X, Y}, $-,{A, B}|L], VP, Acc) ->
+  S=spawn(bfun, uminus, [{{A, B}, VP}]),
+  rm_([{f, S}|L], VP, [$+, {X, Y}|Acc]);
+rm_([Data|L], VP, Acc) ->
+  rm_(L, VP, [Data|Acc]);
+rm_([], _VP, Acc) ->
+  lists:reverse(lists:flatten(Acc)).
