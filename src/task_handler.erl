@@ -35,7 +35,7 @@
 %% str_l list of str_r (Pids preproc&calculate and/or condition data)
 %% goto temp list for got handling
 %% count string counter
-%% pcount count of process lines
+%% pcount count of process lines, position pointer
 %% tid task id
 
 %%%===================================================================
@@ -109,8 +109,6 @@ afterinit(internal, [], State)->
 %% ??VAR[>|>=|<|=<|==]VAR
 
 extract(internal, [], State) ->
-  io:format("~nextract~n"),
-  timer:sleep(2000),
   [LH|LT]=State#th_state.fdata,
   Rget=re:run(LH, "[0-9]+"),
   Aget=re:run(LH, "[A-Z|_]+", [global]),
@@ -140,8 +138,6 @@ extract(internal, [], State) ->
   end.
 
 condt(internal, "?", State) -> %% ? while end
-  io:format("~ncondt?~n~p~nCounter ~p~n", [State, State#th_state.count]),
-  timer:sleep(2000),
   NewCount=State#th_state.count+1,
   [NgotoH|NgotoT]=State#th_state.goto,
   [HL|TL]=State#th_state.fdata,
@@ -149,7 +145,6 @@ condt(internal, "?", State) -> %% ? while end
   NStr=[#str_r{datatype=goto, what=NgotoH}|State#th_state.str_l],
   Pos=NewCount-NgotoH -1,
   OldEntry=lists:nth(Pos, State#th_state.str_l),
-  io:format("~nStruc pos ~p ~nStruc ~p ~n~n", [Pos, OldEntry]),
   Chg=OldEntry#str_r.what,
   Chg2=Chg#while_r{ngoto=NewCount},
   NewEntry=OldEntry#str_r{what=Chg2},
@@ -157,8 +152,6 @@ condt(internal, "?", State) -> %% ? while end
   {keep_state, State#th_state{count=NewCount, goto=NgotoT, fdata=TL, str_l=NewStr}, {next_event, internal, HLL}};
 
 condt(internal, "??", State) ->
-  io:format("~ncondt??~n"),
-  timer:sleep(2000),
   NewCount=State#th_state.count+1,
   [HL|TL]=State#th_state.fdata,
   HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
@@ -167,8 +160,6 @@ condt(internal, "??", State) ->
   {keep_state, State#th_state{goto=NewGoto, count=NewCount, str_l=NewStr, fdata=TL}, {next_event, internal, HLL}};
 
 condt(internal, [$?|Str], State) ->
-  io:format("~ncondt dowhole~n~p~nCounter ~p~nStr ~p~n", [State, State#th_state.count, Str]),
-  timer:sleep(2000),
   NewCount=State#th_state.count+1,
   [HL|TL]=State#th_state.fdata,
   HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
@@ -190,10 +181,9 @@ condt(internal, [$?|Str], State) ->
               ">" -> gt;
               "<" -> lt;
               "<>" -> neq;
-            _NotC -> wrong
+              _NotC -> wrong
             end,
           C_bool=C==wrong,
-          io:format("~n~p ~p ~n", [Str4, C]),
           case C_bool of
             false -> %% correct cond
               case Do_bool of
@@ -221,41 +211,27 @@ condt(internal, [$?|Str], State) ->
   end;
 
 condt(internal, [], State) ->
-  io:format("~ncondt emptyLine to calc_stage~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, calc_stage, State, {next_event, internal, []}};
 
 condt(internal, _Data, State) when State#th_state.fdata==[] ->
-  io:format("~ncondt emptyFile to calc-stage~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, calc_stage, State, {next_event, internal, []}};
 
 condt(internal, Data, State) ->
-  io:format("~ncondt to expression~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, expression, State, {next_event, internal, Data}};
 
 condt(cast, stop, State) ->
   {stop, normal, State}.
 
 expression(internal, [$?|T], State) ->
-  io:format("~nexpression to condt~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, condt, State, {next_event, internal, [$?|T]}};
 
 expression(internal, [], State) ->
-  io:format("~nexpression emptyLine~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, calc_stage, State, {next_event, internal, []}};
 
 expression(internal, _Data, State) when State#th_state.fdata==[] ->
-  io:format("~nexpression emptyFile~n~p~n", [State]),
-  timer:sleep(2000),
   {next_state, calc_stage, State, {next_event, internal, []}};
 
 expression(internal, Data, State) ->
-  io:format("~nexpression~n~p~nCounter ~p~n", [State, State#th_state.count]),
-  timer:sleep(2000),
   Str=re:replace(Data, State#th_state.blanks, "", [{return, list}, global]),
   NStr=var:set_task_str(State#th_state.vp, Str),
   {ok, Pid}=gen_statem:start(preproc, {State#th_state.vp, NStr}, []),
@@ -267,8 +243,6 @@ expression(cast, stop, State) ->
   {stop, normal, State};
 
 expression(cast, Data, State) ->
-  io:format("~nexpression cast~nCounter ~p~n", [State#th_state.count]),
-  timer:sleep(2000),
   case Data of
     {_Sid, StrId} ->
       [HS|TS]=State#th_state.str_l,
@@ -286,8 +260,6 @@ expression(cast, Data, State) ->
   end.
 
 calc_stage(internal, [], State) when State#th_state.goto == [] ->
-  io:format("~ncalc_stage internal~n~p~n", [State]),
-  timer:sleep(2000),
   Str_l=lists:reverse(lists:flatten(State#th_state.str_l)),
   F=fun(Str_r) ->
     A=Str_r#str_r.datatype,
@@ -312,8 +284,6 @@ calc_stage(cast, stop, State) ->
   {stop, normal, State};
 
 calc_stage(cast, Data, State) ->
-  io:format("~ncalc_stage cast~n"),
-  timer:sleep(2000),
   case Data of
     {_SId, ok} ->
       NewPC=State#th_state.pcount-1,
@@ -328,21 +298,16 @@ calc_stage(cast, Data, State) ->
       keep_state_and_data
   end.
 
-start_calc(internal, [], State) when State#th_state.count < State#th_state.pcount ->
-  io:format("~nexit data~n"),
-  timer:sleep(2000),
+start_calc(internal, [], State) when (State#th_state.count-1) < State#th_state.pcount ->
   Aout=[{Vname, var:getvar(State#th_state.vp, Vname)}|| Vname <- State#th_state.aout],
   gen_server:cast(State#th_state.mp, {State#th_state.tid, ok, Aout}),
   keep_state_and_data;
 
 start_calc(internal, [], State) ->
-  io:format("~nstart_calc internal ~n~p~n", [State#th_state.pcount]),
-  timer:sleep(2000),
   Boool=(State#th_state.count-1) >= State#th_state.pcount,
   case Boool of
     true ->
   Entry=lists:nth(State#th_state.pcount, State#th_state.str_l),
-  io:format("~nEntry ~p~n", [Entry]),
   %% datatype while, goto, dowhile, str
   case Entry#str_r.datatype of
     goto ->
@@ -352,7 +317,7 @@ start_calc(internal, [], State) ->
       While=Entry#str_r.what,
       Var1=var:getvar(State#th_state.vp, While#while_r.var1),
       Var2=var:getvar(State#th_state.vp, While#while_r.var2),
-      %% eq eqgt eqlt gt lt
+      %% eq eqgt eqlt gt lt neq
       Bool=case While#while_r.condition of
              eq -> Var1==Var2;
              eqgt -> Var1>=Var2;
@@ -390,16 +355,12 @@ start_calc(internal, [], State) ->
       {keep_state, State}
 end;
     false ->
-      io:format("~nexit data~n"),
-      timer:sleep(2000),
       Aout=[{Vname, var:getvar(State#th_state.vp, Vname)}|| Vname <- State#th_state.aout],
       gen_server:cast(State#th_state.mp, {State#th_state.tid, ok, Aout}),
       keep_state_and_data
   end;
 
 start_calc(cast, {A, B}, State) ->
-  io:format("~nstart_calc cast~n"),
-  timer:sleep(2000),
   case B of
     zero ->
       gen_server:cast(State#th_state.mp, {State#th_state.tid, [error, zero, A]}),
