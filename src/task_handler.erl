@@ -81,9 +81,9 @@ init({MasterPid, {SrcType, Src}, TaskId}) ->
   {ok, Blanks}=re:compile([$[, 8, 9, 10, 13, 32, $], $+]),
   case SrcType of
     f ->
-      {ok, afterinit, #th_state{mp=MasterPid, fp=Src, tid=TaskId, blanks=Blanks, sid=0}, [{next_event, internal, []}]};
+      {ok, afterinit, #th_state{mp=MasterPid, fp=Src, tid=TaskId, blanks=Blanks, sid=0}, {next_event, internal, []}};
     i ->
-      {ok, afterinit_i, #th_state{mp=MasterPid, tid=TaskId, blanks=Blanks, sid=Src}, [{next_event, internal, []}]}
+      {ok, afterinit_i, #th_state{mp=MasterPid, tid=TaskId, blanks=Blanks, sid=Src}, {next_event, internal, []}}
   end.%% Src for inet is listening socket
 
 %% @private
@@ -109,11 +109,11 @@ afterinit_i(internal, [], State) ->
 %% t task
 %% e eot
 
-extract_i(info, {tcp, _Sock, [$r]}, State) ->
+extract_i(info, {tcp, _Sock, "r"}, State) ->
   gen_tcp:send(State#th_state.fp, "OK"),
   {next_state, extract_ir, State};
 
-extract_i(info, {tcp, _Sock, [$t]}, State) ->
+extract_i(info, {tcp, _Sock, "t"}, State) ->
   gen_tcp:send(State#th_state.fp, "OK"),
   {next_state, extract_it, State};
 
@@ -527,18 +527,34 @@ errhandle(cast, stop, State) ->
 %% terminate. It should be the opposite of Module:init/1 and do any
 %% necessary cleaning up. When it returns, the gen_statem terminates with
 %% Reason. The return value is ignored.
-terminate(_Reason, _StateName, {State, Lines, Cnt, _Pcnt}) ->
-  F=fun(El) ->
-    W=maps:get(what, El),
-    case W of
-      str ->
-        gen_statem:stop(maps:get(ppid, El)),
-        gen_statem:stop(maps:get(cpid, El));
-      _Other ->
-        ok
-    end
-    end,
-  [F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)],
+terminate(_Reason, Staten, {State, Lines, Cnt, _Pcnt}) ->
+  Bool=lists:member(Staten, [errhandle, start_calc, expression, condt, calc_stage]),
+  case Bool of
+    true ->
+      F=fun(El) ->
+        W=maps:get(what, El),
+        case W of
+          str ->
+            P=maps:is_key(ppid, El),
+            case P of
+              true -> gen_statem:stop(maps:get(ppid, El));
+              _Po ->
+                ok
+            end,
+            C=maps:is_key(cpid, El),
+            case C of
+              true -> gen_statem:stop(maps:get(cpid, El));
+              _Co ->
+                ok
+            end;
+          _Other ->
+            ok
+        end
+        end,
+      [F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)];
+    false ->
+      ok
+  end,
   gen_server:cast(State#th_state.vp, stop),
   ok.
 
