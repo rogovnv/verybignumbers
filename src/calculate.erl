@@ -64,11 +64,14 @@ get_br(internal, _, {_R, [{v, Vname}, $=, {What, S}], SId, VarPid, []})  ->
   gen_server:cast(MP, {SId, ok}),
   {next_state, exe, {{v, Vname}, $=, {What, S}, SId, VarPid}};
 
+%% here I normalizing operations: a-b to a+(-B) and a/b to a*(1/b) for parallel executing
+
 get_br(internal, _, {R, Str, SId, VarPid, LBr}) ->%cut string
   Str1=u_minus(Str, [], f, VarPid),
   case LBr of
     [] -> % no braces
-      Str2=reverse_minus(Str1, VarPid),
+      Str2M=reverse_minus(Str1, VarPid),
+      Str2=reverse_division(Str2M, VarPid, R),
       {next_state, muldiv, {R, [], SId, VarPid, LBr, Str2}, [{next_event, internal, $*}]};
     _Other ->
       Hlbr=hd(LBr),
@@ -85,18 +88,16 @@ get_br(cast, stop, State) ->
   {stop, normal, State}.
 
 muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L}) ->
-  %% general handling of * / + -
-  BoolM=lists:member(Op, L), %% * / + -
+  %% general handling of * +
+  BoolM=lists:member(Op, L), %% * +
   case BoolM of
     true ->
       Aout=chg_pair(L, Op, [], VarPid, R),%cutting off the pairs
       {keep_state, {R, Str, SId, VarPid, LBr, Aout}, [{next_event, internal, Op}]};
     false ->
       NxOp= case Op of
-              $* -> $/;
-              $/ -> $+;
-              $+ -> $-;
-              $- -> $?
+              $* -> $+;
+              $+ -> $?
             end,
       case NxOp of
         $? -> %% end of current bracket or whole line
@@ -220,4 +221,15 @@ rm_([{X, Y}, $-,{A, B}|L], VP, Acc) ->
 rm_([Data|L], VP, Acc) ->
   rm_(L, VP, [Data|Acc]);
 rm_([], _VP, Acc) ->
+  lists:reverse(lists:flatten(Acc)).
+
+reverse_division(L, VP, Range) ->
+  rd_(L, VP, [], Range).
+
+rd_([{X, Y}, $/, {A, B}|L], VP, Acc, Range) ->
+  S=spawn(bfun, bfun, [{{n, 1}, {A, B}, VP, $/, Range}]),
+  rd_([{f, S}|L], VP, [$*, {X, Y}|Acc], Range);
+rd_([Data|L], VP, Acc, Range) ->
+  rd_(L, VP, [Data|Acc], Range);
+rd_([], _VP, Acc, _Range) ->
   lists:reverse(lists:flatten(Acc)).
