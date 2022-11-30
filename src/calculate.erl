@@ -9,7 +9,6 @@
 -module(calculate).
 -author("mt").
 
-%% APIio:format("~n ~n"),
 -behaviour(gen_statem).
 -export([callback_mode/0, start/1, init/1]).
 -export([extract/3, get_br/3, muldiv/3, exe/3, terminate/3]).
@@ -18,17 +17,17 @@
 callback_mode() ->
   state_functions.
 
-start({VarPid, StringId}) ->
-  gen_statem:start(?MODULE, {VarPid, StringId}, []).
+start({VarPid, StringId, MPid}) ->
+  gen_statem:start(?MODULE, {VarPid, StringId, MPid}, []).
 
 terminate(_Reason, _State, _Data) ->
 
   ok.
 
-init({VarPid, SId}) ->
+init({VarPid, SId, MP}) ->
   process_flag(trap_exit, true),
   Str=var:get_task_str(VarPid, SId),
-  {ok, extract, {Str, SId, VarPid}, [{next_event, internal, []}]}.
+  {ok, extract, {Str, SId, VarPid, MP}, [{next_event, internal, []}]}.
 
 %% States:
 %% extract handles unary minus and extracts lbrackets position
@@ -36,43 +35,40 @@ init({VarPid, SId}) ->
 %% muldiv each iteration creating {f, FunPid} instead of (a operator b), where operator is * / + -
 
 %% corner case 1
-extract(internal, _, {[{v, Vname}, $=, {Type, Val}], SId, VarPid}) ->
-  MP=var:getmaster(VarPid),
+extract(internal, _, {[{v, Vname}, $=, {Type, Val}], SId, VarPid, MP}) ->
   gen_server:cast(MP, {SId, ok}),
-  {next_state, exe, {[{v, Vname}, $=, {Type, Val}], SId, VarPid}};
+  {next_state, exe, {[{v, Vname}, $=, {Type, Val}], SId, VarPid, MP}};
 
 %% corner case 1 neg
-extract(internal, _, {[{v, Vname}, $=, $-, {v, Val}], SId, VarPid}) ->
+extract(internal, _, {[{v, Vname}, $=, $-, {v, Val}], SId, VarPid, MP}) ->
   S=spawn(bfun, uminus, {{v, Val}, VarPid}),
-  MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, ok}),
-  {next_state, exe, {[{v, Vname}, $=, $-, {f, S}], SId, VarPid}};
+  {next_state, exe, {[{v, Vname}, $=, $-, {f, S}], SId, VarPid, MP}};
 
-extract(internal, _, {Str, SId, VarPid}) ->
+extract(internal, _, {Str, SId, VarPid, MP}) ->
   L=u_minus(Str, [], v, VarPid),
   LBr=get_lbr(L), %% backward order is normal
   R=list_to_integer("1"++lists:duplicate(gen_server:call(VarPid, range), $0)),
-  {next_state, get_br, {R, L, SId, VarPid, LBr}, [{next_event, internal, []}]};
+  {next_state, get_br, {R, L, SId, VarPid, LBr, MP}, [{next_event, internal, []}]};
 
 extract(cast, stop, State) ->
   {stop, normal, State}.
 
 %% catch 1
-get_br(internal, _, {_R, [{v, Vname}, $=, {What, S}], SId, VarPid, []})  ->
+get_br(internal, _, {_R, [{v, Vname}, $=, {What, S}], SId, VarPid, [], MP})  ->
   %% to Master
-  MP=var:getmaster(VarPid),
   gen_server:cast(MP, {SId, ok}),
-  {next_state, exe, {{v, Vname}, $=, {What, S}, SId, VarPid}};
+  {next_state, exe, {{v, Vname}, $=, {What, S}, SId, VarPid, MP}};
 
 %% here I normalizing operations: a-b to a+(-B) and a/b to a*(1/b) for parallel executing
 
-get_br(internal, _, {R, Str, SId, VarPid, LBr}) ->%cut string
+get_br(internal, _, {R, Str, SId, VarPid, LBr, MP}) ->%cut string
   Str1=u_minus(Str, [], f, VarPid),
   case LBr of
     [] -> % no braces
       Str2M=reverse_minus(Str1, VarPid),
       Str2=reverse_division(Str2M, VarPid, R),
-      {next_state, muldiv, {R, [], SId, VarPid, LBr, Str2}, [{next_event, internal, $*}]};
+      {next_state, muldiv, {R, [], SId, VarPid, LBr, Str2, MP}, [{next_event, internal, $*}]};
     _Other ->
       Hlbr=hd(LBr),
       RBr=get_rbr(Str1, 1, 0),
@@ -81,19 +77,19 @@ get_br(internal, _, {R, Str, SId, VarPid, LBr}) ->%cut string
       L2=L--"()",
       Str2=lists:flatten([lists:sublist(Str1, 1, Hlbr-1), lists:sublist(Str1, RBr+1, length(Str1)-RBr)]),
       L3=reverse_minus(L2, VarPid),
-      {next_state, muldiv, {R, Str2, SId, VarPid, LBr, L3}, [{next_event, internal, $*}]}
+      {next_state, muldiv, {R, Str2, SId, VarPid, LBr, L3, MP}, [{next_event, internal, $*}]}
   end;
 
 get_br(cast, stop, State) ->
   {stop, normal, State}.
 
-muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L}) ->
+muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L, MP}) ->
   %% general handling of * +
   BoolM=lists:member(Op, L), %% * +
   case BoolM of
     true ->
       Aout=chg_pair(L, Op, [], VarPid, R),%cutting off the pairs
-      {keep_state, {R, Str, SId, VarPid, LBr, Aout}, [{next_event, internal, Op}]};
+      {keep_state, {R, Str, SId, VarPid, LBr, Aout, MP}, [{next_event, internal, Op}]};
     false ->
       NxOp= case Op of
               $* -> $+;
@@ -105,11 +101,10 @@ muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L}) ->
           case BoolLbr of
             true ->% catch 2
               Len=length(L),
-              MP=var:getmaster(VarPid),
               case Len of
                 3 ->
                   gen_server:cast(MP, {SId, ok}),
-                  {next_state, exe, {L, SId, VarPid}};
+                  {next_state, exe, {L, SId, VarPid, MP}};
                 _Other ->
                   gen_server:cast(MP, {SId, error}),
                   keep_state_and_data
@@ -119,20 +114,20 @@ muldiv(internal, Op, {R, Str, SId, VarPid, LBr, L}) ->
               Len=length(Str)-H+1,
               Str2=lists:flatten([lists:sublist(Str, 1, H-1), L, lists:sublist(Str, H, Len)]),
               Str3=u_minus(Str2, [], f, VarPid),
-              {next_state, get_br, {R, Str3, SId, VarPid, Tlbr}, [{next_event, internal, []}]}
+              {next_state, get_br, {R, Str3, SId, VarPid, Tlbr, MP}, [{next_event, internal, []}]}
           end;
         _Other ->
-          {keep_state, {R, Str, SId, VarPid, LBr, L}, [{next_event, internal, NxOp}]}
+          {keep_state, {R, Str, SId, VarPid, LBr, L, MP}, [{next_event, internal, NxOp}]}
       end
   end;
 
 muldiv(cast, stop, State) ->
   {stop, normal, State}.
 
-exe(cast, stop, {Str, SId, VP, Vname}) ->
-  {stop, normal, {Str, SId, VP, Vname}};
+exe(cast, stop, {Str, SId, VP, Vname, MP}) ->
+  {stop, normal, {Str, SId, VP, Vname, MP}};
 
-exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
+exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid, MP}) ->
   Answer=case What of
            n ->
               Val;
@@ -142,7 +137,6 @@ exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
              get_answer(Val)
   end,
   var:setvar(VarPid, Vname, Answer),
-  MP=var:getmaster(VarPid),
   Bool=var:is_existv(VarPid, "zero"),
   case Bool of
     true ->
@@ -152,9 +146,9 @@ exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid}) ->
   end,
   keep_state_and_data;
 
-exe(cast, stop, {Str, SId, VarPid}) ->
+exe(cast, stop, {Str, SId, VarPid, MP}) ->
   clear_data(Str),
-  {stop, normal, {Str, SId, VarPid}}.
+  {stop, normal, {Str, SId, VarPid, MP}}.
 
 get_lbr(Str)->
   ex(Str, [], 1).

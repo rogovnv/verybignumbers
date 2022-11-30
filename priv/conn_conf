@@ -1,0 +1,4 @@
+wdir /media/download/bc
+conns 2
+port 2000
+maxmem 500000000
