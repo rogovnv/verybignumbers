@@ -26,8 +26,9 @@
 
 Формат файла задачи:
 
->R=precision A=(list_of_vars)
->[expression]
+R=precision A=(list_of_vars)
+  <br>
+[expression]
 
 expression:= Var=arith_expr | ? | ?Var1 cond Var2 | ?? | ??Var1 cond Var2
 
@@ -46,21 +47,22 @@ arith_expr типичное арифметическое выражение со
   
 Предусловие - типичный WHILE:
 
-> ?Var1 cond Var2
+ ?Var1 cond Var2
   <br>
-> expression
+ expression
   <br>
-> ?
+ ?
 
 Постусловие DO..WHILE:
 
-> ??
+ ??
   <br>
-> expression
+ expression
   <br>
-> ??Var1 cond Var2
+ ??Var1 cond Var2
 
 Со страницы в баузере доступны три операции для пользователей и одна для локального администратора:
+  
 <li> - загрузить фал задачи и получить Tid;
 <li> - узнать состояние выполнения/результат;
 <li> - получить справку;
