@@ -2,9 +2,7 @@
 %%% @author mt
 %%% @copyright (C) 2022, <COMPANY>
 %%% @doc
-%%%  IF U FUCKING DONNA KNOW!
-%%% THE ACCEPTED TCP CONNECTION, THAT'S OWNER IS ANY GEN_, CLOSES WHEN EITHER TERMINATES PROCESS OR EXPLICITLY CALLS GEN_TCP:CLOSE
-%%% ONLY WHEN WILL FINISH SENDING RESPONSE
+%%%  conn handler
 %%% @end
 %%% Created : 26. сент. 2022 19:03
 %%%-------------------------------------------------------------------
