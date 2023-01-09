@@ -2,12 +2,15 @@
 %%% @author mt
 %%% @copyright (C) 2022, <COMPANY>
 %%% @doc
-%%%  conn handler
+%%%  IF U FUCKING DONNA KNOW!
+%%% THE ACCEPTED TCP CONNECTION, THAT'S OWNER IS ANY GEN_, CLOSES WHEN EITHER TERMINATES PROCESS OR EXPLICITLY CALLS GEN_TCP:CLOSE
+%%% ONLY WHEN WILL FINISH SENDING RESPONSE
 %%% @end
 %%% Created : 26. сент. 2022 19:03
 %%%-------------------------------------------------------------------
 -module(conn_handler).
 -author("mt").
+%% erlc +debug_info  *.erl
 
 -behaviour(gen_statem).
 
@@ -96,19 +99,30 @@ format_status(_Opt, [_PDict, _StateName, _State]) ->
 %% @doc If callback_mode is handle_event_function, then whenever a
 %% gen_statem receives an event from call/2, cast/2, or as a normal
 %% process message, this function is called.
-handle_event(internal, [], afterinit, #ch_state{lsock=Lsock}=State) ->
+handle_event(internal, [], afterinit, State) ->
   {ok, Bound}=re:compile("[B|b]oundary=[\-]+[0-9]+"), %% find boundary data
   {ok, Type}=re:compile("[C|c]ontent-[T|t]ype: text"), %% file type
   {ok, F_begin}=re:compile("[C|c]ontent-[T|t]ype: text\/[a-z|A-Z|\-]+\\r\\n\\r\\n"), %% file begins
-  {ok, Form_data}=re:compile("\\r\\n\\r\\nTask ID=[a-z|A-Z|0-9|\-]+"), %% form data begin
+  {ok, Form_data}=re:compile("\\r\\n\\r\\nTask ID=[\s]?[a-z|A-Z|0-9|\-]+"), %% form data begin
   {ok, Fname}=re:compile("[F|f]ilename=\\\"[a-z|A-Z|0-9|\-|_]+\.[A-Za-z]{1,3}"), %% file name
   case g_repo:inet_box_status() of
     foll_down ->
       keep_state_and_data;
     hold_it ->
-      {ok, S}=gen_tcp:accept(Lsock),
-      {next_state, req, State#ch_state{part=false, overheap=false, sock=S, boundary=Bound, ftype=Type, fbgn=F_begin, form_data=Form_data, fname=Fname}}
+      {next_state, req, State#ch_state{part=false, overheap=false, boundary=Bound, ftype=Type, fbgn=F_begin, form_data=Form_data, fname=Fname}, {next_event, internal, connect}}
     end;
+
+handle_event(internal, connect, req, State) ->
+  #ch_state{lsock=Lsock}=State,
+  Socket=gen_tcp:accept(Lsock, 3),
+  case Socket of
+    {ok, Sock} ->
+      {keep_state, State#ch_state{sock=Sock}};
+    {error, timeout} ->
+      {keep_state_and_data, {next_event, internal, connect}};
+    _Error ->
+      keep_state_and_data
+  end;
 
 handle_event(cast, overheap, _S, State) ->
   {keep_state, State#ch_state{overheap=true}};
@@ -117,7 +131,7 @@ handle_event(cast, overheapoff, _S, State) ->
   {keep_state, State#ch_state{overheap=false}};
 
 handle_event(internal, response, req, State) ->
-  #ch_state{response = R, sock=S, lsock=Lsock}=State,
+  #ch_state{response = R, sock=S}=State,
   case State#ch_state.part of
     true ->
       {next_state, req, State};
@@ -126,20 +140,17 @@ handle_event(internal, response, req, State) ->
       gen_tcp:close(S),
       case g_repo:inet_box_status() of
         hold_it ->
-          {ok, Sock}=gen_tcp:accept(Lsock),
-          {next_state, req, State#ch_state{response = [], sock=Sock}};
+          {keep_state, State#ch_state{response = []}, {next_event, internal, connect}};
         foll_down ->
           keep_state_and_data
       end
 end;
   
 handle_event(info, {tcp_closed, Sock}, req, #ch_state{sock=Sock}=State) ->
-  #ch_state{lsock=Lsock}=State,
   case g_repo:inet_box_status() of
     hold_it ->
       gen_tcp:close(Sock),
-      {ok, S}=gen_tcp:accept(Lsock),
-      {keep_state, State#ch_state{sock=S, part=false, bbord = [], buffer = [], chunk_cnt = 0}};
+      {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0}, {next_event, internal, connect}};
     foll_down ->
       {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0}}
   end;

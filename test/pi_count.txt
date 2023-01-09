@@ -1,0 +1,14 @@
+R=6 A=(ACC CUR MED)
+ACC=4
+CUR=3
+SIGN=-1
+MED=100
+NULL=0
+?MED<>NULL
+  MED=(4/CUR)*SIGN
+  ACC=ACC+MED
+  SIGN=SIGN*-1
+  CUR=CUR+2
+?
+
+calculates Pi with precision 6 digits abt 3 minutes

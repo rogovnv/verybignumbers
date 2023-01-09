@@ -221,9 +221,10 @@ reverse_division(L, VP, Range) ->
   rd_(L, VP, [], Range).
 
 rd_([{X, Y}, $/, {A, B}|L], VP, Acc, Range) ->
-  S=spawn(bfun, bfun, [{{n, 1}, {A, B}, VP, $/, Range}]),
+  S=spawn(bfun, bfun, [{{n, Range}, {A, B}, VP, $/, Range}]),
   rd_([{f, S}|L], VP, [$*, {X, Y}|Acc], Range);
 rd_([Data|L], VP, Acc, Range) ->
   rd_(L, VP, [Data|Acc], Range);
 rd_([], _VP, Acc, _Range) ->
   lists:reverse(lists:flatten(Acc)).
+
