@@ -178,8 +178,10 @@ handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $a, $d, $m, $i, $n|_T]}, req
     {ok, Bin} ->
       L=string:split(binary:bin_to_list(Bin), [10], all),
       file:delete(Dir++"/doit.txt"),
-      Answer=unicode:characters_to_binary(M1++admin_list(L, Dir)++M2),
-      io_lib:fwrite("~s~p~s~s", [H, size(Answer), list_to_binary("\r\n\r\n"), Answer]);
+      Answer1=unicode:characters_to_binary(M1),
+      Answer3=unicode:characters_to_binary(M2),
+      Answer2=unicode:characters_to_binary(io_lib:fwrite("~p",[admin_list(L, Dir)])),
+      io_lib:fwrite("~s~p~s~s~s~s", [H, size(Answer1)+size(Answer2)+size(Answer3), list_to_binary("\r\n\r\n"), Answer1, Answer2, Answer3]);
     Error ->
       A=unicode:characters_to_binary(M1++io_lib:fwrite("~p", [Error])++M2),
       io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A])
@@ -193,7 +195,7 @@ handle_event(info, {tcp, Sock, [$G, $E, $T|_T]}, req, #ch_state{sock=Sock}=State
 
 handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}=State) ->
   #ch_state{overheap=OHp, head=H, main1=M1, main2=M2}=State,
-  Form_data=re:run(Data, State#ch_state.form_data),
+  Form_data=re:run(Data, "\\r\\n\\r\\nTask ID="),
   Type=re:run(Data, State#ch_state.ftype),
   Bool=(Type==nomatch),
   case Bool of %% common data
@@ -264,11 +266,18 @@ handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}
               Dd=io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A]),
               {keep_state, State#ch_state{part=false, buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
           end;
-        {match, [{Pos, Len}]} -> %% form data: get result
-          [_, Tid]=string:split(lists:sublist(Data, Pos+1, Len), "="),
-          Answer=unicode:characters_to_binary(M1++io_lib:fwrite("~p", [g_repo:answer(Tid)])++M2),
-          Db=io_lib:fwrite("~s~p~s~s", [H, size(Answer), list_to_binary("\r\n\r\n"), Answer]),
-          {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0, response = Db}, {next_event, internal, response}}
+        _FormData -> %% form data: get result
+          FormD=re:run(Data, State#ch_state.form_data),
+          case FormD of
+            {match, [{Pos, Len}]} ->%% correct form data
+              [_, Tid]=string:split(lists:sublist(Data, Pos+1, Len), "="),
+              Answer=unicode:characters_to_binary(M1++io_lib:fwrite("~p", [g_repo:answer(Tid)])++M2),
+              Db=io_lib:fwrite("~s~p~s~s", [H, size(Answer), list_to_binary("\r\n\r\n"), Answer]),
+              {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0, response = Db}, {next_event, internal, response}};
+            _OtherData ->
+              DOth=iolist_to_binary("Wrong Data"),
+              {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0, response = DOth}, {next_event, internal, response}}
+            end
         end;
     true -> %% no match common data
       ok,
@@ -379,13 +388,17 @@ admin_list([H|T], Dir, Acc) ->
       L=supervisor:which_children(th_sup),
       Aout=[{Id, process_info(Pid, memory), g_repo:answer(Id)}||{Id, Pid, _, _}<- L],
       To_file=iolist_to_binary(io_lib:format("~p~n", [Aout])),
-      file:write_file(Dir++"_aout.txt", To_file),
+      Name=Dir++"/_aout.txt",
+      filelib:is_file(Name) andalso file:delete(Name),
+      file:write_file(Name, To_file),
       admin_list(T, Dir, [{"aout.txt"}|Acc]);
     "m" ->
       g_repo:setmaxmem(Value),
       admin_list(T, Dir, [{"mem"}|Acc]);
     "s" ->
-      top_sup:stop()
+      top_sup:stop();
+    _Other ->
+      Acc
   end.
 
 

@@ -44,8 +44,8 @@ start(_StartType, _StartArgs) -> %% /priv/conn_conf must have
     case Y of
     [A, B] ->
       {A, re:replace(B, "[\s\n\r\t]", "", [{return, list}])};
-    [Alone] ->
-      {Alone, 2}
+    [_Alone] ->
+      {"nop", 2}
     end
   end,
   case F of

@@ -1,0 +1,22 @@
+R=2 A=(V VTWO VONE)
+NULL=0
+LIM=2
+COND=NULL
+V=0
+THREE=3
+BGN_A=3
+?BGN_A>NULL
+	BGN_B=3
+	BGN_A=BGN_A-1
+		?BGN_B>NULL
+			BGN_B=BGN_B-1
+			V=V+1
+		?
+		BGN_C=0
+		??
+			BGN_C=BGN_C+1
+			V=V+1
+		??BGN_C<THREE
+?
+VTWO=-(120.0e-2+0)
+VONE=1.00+(-1+1)*1.0e2+(11.11-1.11+(1.0e2-100))

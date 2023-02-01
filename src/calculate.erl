@@ -127,7 +127,13 @@ muldiv(cast, stop, State) ->
 exe(cast, stop, {Str, SId, VP, Vname, MP}) ->
   {stop, normal, {Str, SId, VP, Vname, MP}};
 
+exe(cast, get, {{v, Vname}, $=, {What, Val}, SId, VarPid, MP}) ->
+  {keep_state, {[{v, Vname}, $=, {What, Val}], SId, VarPid, MP}, {next_event, internal, get}};
+
 exe(cast, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid, MP}) ->
+  {keep_state, {[{v, Vname}, $=, {What, Val}], SId, VarPid, MP}, {next_event, internal, get}};
+
+exe(internal, get, {[{v, Vname}, $=, {What, Val}], SId, VarPid, MP}) ->
   Answer=case What of
            n ->
               Val;

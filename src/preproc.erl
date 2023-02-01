@@ -50,7 +50,7 @@ afterinit(internal, Strr, {VarPid, StringId, MP}) ->
   Varv=[{X+1, {v,lists:sublist(Str, X+1, Y)}}|| {X, Y} <- Varb],
   %% extract negative numbers(with unary minus)
   {Str2, Extract}=replacevar(Str, Varv, Str),
-  N=re:run(Extract, "[-+*/=(]-[0-9]+\\.[0-9]+e[0-9]+|[-+*/=(]-[0-9]+\\.[0-9]+|[-+*/=(]-[0-9]+", [global]),
+  N=re:run(Extract, "[-+*/=(]-[0-9]+\\.[0-9]+e[0-9]+|[-+*/=(]-[0-9]+\\.[0-9]+e-[0-9]+|[-+*/=(]-[0-9]+\\.[0-9]+|[-+*/=(]-[0-9]+", [global]),
   {Negv, {Str3, Extract2}}=case N of
                              {match, NegN} ->
                                   E=lists:flatten(NegN),
@@ -61,7 +61,7 @@ afterinit(internal, Strr, {VarPid, StringId, MP}) ->
                                   {[],{Str2, Extract}}
                               end,
   %% extract positive numbers
-  R=re:run(Extract2, "[0-9]+\\.[0-9]+e[0-9]+|[0-9]+\\.[0-9]+|[0-9]+", [global]),
+  R=re:run(Extract2, "[0-9]+\\.[0-9]+e[0-9]+|[0-9]+\\.[0-9]+e-[0-9]+|[0-9]+\\.[0-9]+|[0-9]+", [global]),
   {Posv, Str4}= case R of
                   {match, Posa} ->
                         Posb=lists:flatten(Posa),
@@ -326,9 +326,9 @@ handle_num(VarPid, Num) ->
       D=L+R,
       {Med2, Dot}= if
              D<0 ->
-               {lists:duplicate(-D, $0)++Med, 0};
+               {lists:duplicate(abs(D), $0)++Med, 0};
              true ->
-               {Med++lists:duplicate(R, $0), D}
+               {Med++lists:duplicate(abs(R), $0), D}
            end,
       list_to_integer(lists:sublist(lists:flatten(Med2), 1, Dot+Range))
   end.

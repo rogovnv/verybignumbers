@@ -18,7 +18,7 @@
 %% gen_statem callbacks
 -export([init/1, format_status/2, terminate/3, code_change/4, callback_mode/0]).
 
--record(th_state, {vp, fdata, blanks, range, aout, goto, tid, addr, fname}).
+-record(th_state, {vp, fdata, blanks, range, aout, tid, addr, fname}).
 
 %% datatype while, goto, do, dowhile, str
 %% what while_r, str_data, Ngoto
@@ -29,7 +29,6 @@
 %% range precision range
 %% aout list of vars, that has a result
 %% str_l list of str_r (Pids preproc&calculate and/or condition data)
-%% goto temp list for got handling
 %% count string counter
 %% pcount count of process lines, position pointer
 %% tid task id
@@ -95,13 +94,15 @@ extract(internal, [], State) ->
       Rp=list_to_integer(lists:sublist(LH, RX+3, RL-2)),
       Alst=lists:sublist(LH, B+4, L-4),
       ALst=string:split(Alst, " ", all),
-      [H|T]=LT,
-      HH=re:replace(H, State#th_state.blanks, "", [global, {return, list}]),
+      [H|T]=[re:replace(Ll, State#th_state.blanks, "", [global, {return, list}])||Ll <- LT],
       {ok, VarPid}=gen_server:start(var, Rp, []),
-      Lines=#{},
-      {next_state, condt, {State#th_state{fdata=T, vp=VarPid, range=Rp, aout=ALst, goto=[]}, Lines, 0, 0}, {next_event, internal, HH}};
+      Lines=trace_conds([H|T]), %% #{key:stringpos, {while_|dowhile_|ggoto}}
+      case is_map(Lines) of
+        true ->  {next_state, condt, {State#th_state{fdata=T, vp=VarPid, range=Rp, aout=ALst}, Lines, 1, 0}, {next_event, internal, H}};
+        false -> {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Lines}}}
+      end;
     {true, true} ->
-      {next_state, errhandle, {State, [], [], []}, {next_event, internal, {error, {no_range, no_aout}}}};
+      {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, {no_range, no_aout}}}};
     _Other ->
       Answer=case element(1, Bool) of
                true ->
@@ -109,7 +110,7 @@ extract(internal, [], State) ->
                false ->
                  no_aout
              end,
-             {next_state, errhandle, {State, [], [], []}, {next_event, internal, {error, Answer}}}
+      {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Answer}}}
   end;
 
 extract(cast, stop, State) ->
@@ -123,24 +124,15 @@ condt(internal, [], State) ->
 
 condt(internal, "?", {State, Lines, Cnt, Pcnt}) -> %% ? while end
   NewCount=Cnt+1,
-  [NgotoH|NgotoT]=State#th_state.goto,
   BoolS=State#th_state.fdata == [],
   [HL|TL]=case BoolS of
             true -> [[]|[]];
             false -> State#th_state.fdata
           end,
-  HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
-  %% #{W=what, V1=var1, V2=var2, O=op, goto}=maps:get(NgotoH, Lines),
-  El=maps:get(NgotoH, Lines),
-  %% NewEl=#{what => W, var1 => V1, var2 => V2, op => O, ngoto => NewCount+1},
-  NewEl=El#{ngoto => NewCount+2},
-  NewLines=maps:put(NgotoH, NewEl, maps:remove(NgotoH, Lines)),
-  NewnewEl=#{what => ggoto, ngoto => NgotoH},
-  NewnewLines=maps:put(NewCount, NewnewEl, NewLines),
-  Is_cond=re:run(HLL, "\\?")==nomatch,
+  Is_cond=re:run(HL, "\\?")==nomatch,
   case Is_cond of
-    true -> {keep_state, {State#th_state{goto=NgotoT, fdata=TL}, NewnewLines, NewCount, Pcnt}, {next_event, internal, HLL}};
-    false -> {next_state, expression, {State#th_state{goto=NgotoT, fdata=TL}, NewnewLines, NewCount, Pcnt}, {next_event, internal, HLL}}
+    true -> {keep_state, {State#th_state{fdata=TL}, Lines, NewCount, Pcnt}, {next_event, internal, HL}};
+    false -> {next_state, expression, {State#th_state{fdata=TL}, Lines, NewCount, Pcnt}, {next_event, internal, HL}}
   end;
 
 condt(internal, "??", {State, Lines, Cnt, Pcnt}) ->
@@ -150,14 +142,10 @@ condt(internal, "??", {State, Lines, Cnt, Pcnt}) ->
             true -> [[]|[]];
             false -> State#th_state.fdata
           end,
-  HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
-  NewEl=#{what => ggoto, ngoto => NewCount+1},
-  NewGoto=[NewCount|State#th_state.goto],
-  NewLines=maps:put(NewCount, NewEl, Lines),
-  Is_cond=re:run(HLL, "\\?")==nomatch,
+  Is_cond=re:run(HL, "\\?")==nomatch,
   case Is_cond of
-    true -> {keep_state, {State#th_state{goto=NewGoto, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}};
-    false -> {next_state, expression, {State#th_state{goto=NewGoto, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}}
+    true -> {keep_state, {State#th_state{fdata=TL}, Lines, NewCount, Pcnt}, {next_event, internal, HL}};
+    false -> {next_state, expression, {State#th_state{fdata=TL}, Lines, NewCount, Pcnt}, {next_event, internal, HL}}
   end;
 
 condt(internal, [$?, $?|Str], {State, Lines, Cnt, Pcnt}) ->%% dowhile
@@ -167,8 +155,7 @@ condt(internal, [$?, $?|Str], {State, Lines, Cnt, Pcnt}) ->%% dowhile
             true -> [[]|[]];
             false -> State#th_state.fdata
           end,
-  HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
-  Is_cond=re:run(HLL, "\\?")==nomatch,
+  Is_cond=re:run(HL, "\\?")==nomatch,
   While_correct=re:run(Str, "[A-Z|_]+", [global]),
   case While_correct of
     {match, [[{A, B}], [{F, D}]]} ->
@@ -187,18 +174,25 @@ condt(internal, [$?, $?|Str], {State, Lines, Cnt, Pcnt}) ->%% dowhile
       C_bool=C==wrong,
       case C_bool of
         false -> %% correct cond
-          [NgotoH|NgotoT]=State#th_state.goto,
-          NewEl=#{what => dowhile_, var1 => Var1, var2 => Var2, op => C, ngoto => NgotoH},
-          NewLines=maps:put(NewCount, NewEl, Lines),
-          case Is_cond of
-            true ->  {keep_state, {State#th_state{goto=NgotoT, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}};
-            false ->  {next_state, expression, {State#th_state{goto=NgotoT, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}}
+          CurPos=maps:get(Cnt, Lines),
+          Pos=maps:get(ngoto, CurPos),
+          NewEl=#{what => dowhile_, var1 => Var1, var2 => Var2, op => C, ngoto => Pos},
+          NewLines=maps:put(Cnt, NewEl, maps:remove(Cnt, Lines)),
+          BoolVar=var:is_existv(State#th_state.vp, Var1) andalso var:is_existv(State#th_state.vp, Var2),
+          case BoolVar of
+            true ->
+              case Is_cond of
+                true ->  {keep_state, {State#th_state{fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HL}};
+                false ->  {next_state, expression, {State#th_state{fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HL}}
+              end;
+            _NoVar ->
+              {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, {error, wrong_var_in_cond, Cnt}}}
           end;
         true ->
-          {next_state, errhandle, {State, Lines, NewCount, Pcnt} , {next_event, internal, [error, in_cond, NewCount]}}
+          {next_state, errhandle, {State, Lines, NewCount, Pcnt} , {next_event, internal, [error, in_cond, Cnt]}}
         end;
         _NotMatch ->
-          {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, [error, in_cond, NewCount]}}
+          {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, [error, in_cond, Cnt]}}
   end;
 
 condt(internal, [$?|Str], {State, Lines, Cnt, Pcnt}) ->%% while
@@ -208,8 +202,7 @@ condt(internal, [$?|Str], {State, Lines, Cnt, Pcnt}) ->%% while
             true -> [[]|[]];
             false -> State#th_state.fdata
           end,
-  HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
-  Is_cond=re:run(HLL, "\\?")==nomatch,
+  Is_cond=re:run(HL, "\\?")==nomatch,
   While_correct=re:run(Str, "[A-Z|_]+", [global]),
   case While_correct of
     {match, [[{A, B}], [{F, D}]]} ->
@@ -228,18 +221,25 @@ condt(internal, [$?|Str], {State, Lines, Cnt, Pcnt}) ->%% while
       C_bool=C==wrong,
       case C_bool of
         false -> %% correct cond
-          NewEl=#{what => while_, var1 => Var1, var2 => Var2, op => C, ngoto => NewCount},
-          NewLines=maps:put(NewCount, NewEl, Lines),
-          NewGoto=[NewCount|State#th_state.goto],
-          case Is_cond of
-            true -> {keep_state, {State#th_state{goto=NewGoto, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}};
-            false -> {next_state, expression, {State#th_state{goto=NewGoto, fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HLL}}
+          CurPos=maps:get(Cnt, Lines),
+          Pos=maps:get(ngoto, CurPos),
+          NewEl=#{what => while_, var1 => Var1, var2 => Var2, op => C, ngoto => Pos},
+          NewLines=maps:put(Cnt, NewEl, maps:remove(Cnt, Lines)),
+          BoolVar=var:is_existv(State#th_state.vp, Var1) andalso var:is_existv(State#th_state.vp, Var2),
+          case BoolVar of
+            true ->
+              case Is_cond of
+                true -> {keep_state, {State#th_state{fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HL}};
+                false -> {next_state, expression, {State#th_state{fdata=TL}, NewLines, NewCount, Pcnt}, {next_event, internal, HL}}
+              end;
+            _NoVar ->
+              {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, {error, wrong_var_in_cond, Cnt}}}
           end;
     true -> %% wrong cond
-      {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, [error, in_cond, NewCount]}}
+      {next_state, errhandle, {State, Lines, Cnt, Pcnt}, {next_event, internal, [error, in_cond, Cnt]}}
   end;
   _Notmatch ->
-    {next_state, errhandle, {State, Lines, NewCount, Pcnt}, {next_event, internal, [error, in_cond, NewCount]}}
+    {next_state, errhandle, {State, Lines, Cnt, Pcnt}, {next_event, internal, [error, in_cond, Cnt]}}
   end;
 
 condt(internal, _Data, State) when State#th_state.fdata==[] ->
@@ -263,15 +263,13 @@ expression(internal, [], State) ->
 expression(internal, _Data, {State, Lines, Cnt, Pcnt}) when State#th_state.fdata==[] ->
   {next_state, calc_stage, {State, Lines, Cnt, Pcnt}, {next_event, internal, []}};
 
-expression(internal, Data, {State, Lines, Cnt, Pcnt}) ->
-  NewCount=Cnt+1,
+expression(internal, Str, {State, Lines, Cnt, Pcnt}) ->
   NewPC=Pcnt+1,
-  Str=re:replace(Data, State#th_state.blanks, "", [{return, list}, global]),
   NStr=var:set_task_str(State#th_state.vp, Str),
   {ok, Pid}=gen_statem:start(preproc, {State#th_state.vp, NStr, self()}, []),
   NewEl=#{what => str, pstr => NStr, ppid => Pid},
-  NewLines=maps:put(NewCount, NewEl, Lines),
-  {keep_state, {State, NewLines, NewCount, NewPC}};
+  NewLines=maps:put(Cnt, NewEl, Lines),
+  {keep_state, {State, NewLines, Cnt, NewPC}};
 
 expression(cast, stop, State) ->
   {stop, normal, State};
@@ -284,9 +282,7 @@ expression(cast, Data, {State, Lines, Cnt, Pcnt}) ->
     {Sid, {error, Err}} ->
       {next_state, errhandle, {State, Lines, Cnt, Pcnt}, {next_event, internal, [error, in_expr, [Sid, {error, Err}], Cnt]}};
     {_Sid, StrId} ->
-      %% #{what, pstr, PP=ppid, cpid}=maps:get(Cnt, Lines),
       El=maps:get(Cnt, Lines),
-      %% NewEl=#{what => str, pstr => StrId, ppid => PP},
       NewEl=El#{what => str, pstr => StrId},
       NewLines=maps:put(Cnt, NewEl, maps:remove(Cnt, Lines)),
       BoolS=State#th_state.fdata == [],
@@ -294,17 +290,16 @@ expression(cast, Data, {State, Lines, Cnt, Pcnt}) ->
                 true -> [[]|[]];
                 false -> State#th_state.fdata
               end,
-      HLL=re:replace(HL, State#th_state.blanks, "", [{return, list}, global]),
-      Is_cond=re:run(HLL, "\\?")==nomatch,
+      Is_cond=re:run(HL, "\\?")==nomatch,
       case Is_cond of
-        true -> {next_state, condt, {State#th_state{fdata=TL}, NewLines, Cnt, Pcnt}, {next_event, internal, HLL}};
-        false -> {keep_state, {State#th_state{fdata=TL}, NewLines, Cnt, Pcnt}, {next_event, internal, HLL}}
+        true -> {next_state, condt, {State#th_state{fdata=TL}, NewLines, Cnt+1, Pcnt}, {next_event, internal, HL}};
+        false -> {keep_state, {State#th_state{fdata=TL}, NewLines, Cnt+1, Pcnt}, {next_event, internal, HL}}
       end;
     Mistake->
       {next_state, errhandle, {State, Lines, Cnt, Pcnt}, {next_event, internal, [error, in_expr, Mistake, Cnt]}}
   end.
 
-calc_stage(internal, [], {State, Lines, Cnt, Pcnt}) when State#th_state.goto == [] ->
+calc_stage(internal, [], {State, Lines, Cnt, Pcnt}) ->
   NewLines=startcalc(State#th_state.vp, Lines),
   {keep_state, {State, NewLines, Cnt, Pcnt, Pcnt}};
 
@@ -323,7 +318,7 @@ calc_stage(cast, Data, {State, Lines, Cnt, Pcnt, Pcnt_}) ->
       NewPC=Pcnt_-1,
       case NewPC of
         0 ->
-          {next_state, start_calc, {State, Lines, Cnt, 1}, {next_event, internal , []}};
+          {next_state, start_calc, {State, Lines, maps:size(Lines), 1}, {next_event, internal , []}};
         _Other ->
           {keep_state, {State, Lines, Cnt, Pcnt, NewPC}}
       end;
@@ -341,7 +336,7 @@ start_calc(internal, [], {State, Lines, Cnt, Pcnt}) ->
   case Boool of
     true ->
       Entry=maps:get(Pcnt, Lines),
-  %% datatype while, goto, dowhile, str
+  %% datatype while, ggoto, dowhile, str
       W=maps:get(what, Entry),
       case W of
         ggoto ->
@@ -446,7 +441,10 @@ terminate(_Reason, Staten, {State, Lines, Cnt, _Pcnt}) ->
             ok
         end
         end,
-      [F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)];
+      case Cnt of
+        0 -> ok;
+        _Other -> [F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)]
+      end;
     false ->
       ok
   end,
@@ -484,3 +482,53 @@ sc(VP, Lines, Sz, Num, New) ->
       NewLines=maps:put(Num, NewEl, New),
       sc(VP, Lines, Sz, Num+1, NewLines)
   end.
+
+trace_conds(L) ->
+  tc(#{}, [], L, 1).
+
+tc(M, [], [], _Any) -> M;
+tc(_M, Any, [], _N) when Any /=[] -> cond_not_closed;
+tc(M, Left, [H|T], N) ->
+  Bool=Left==[],
+  [Hl|Tl]=case Bool of
+    true -> [[]|[]];
+    false -> Left
+  end,
+  case H of
+    "??" ->
+      tc(M, [{ggoto, N}|Left], T, N+1);
+    [$?, $?|_OtherDo] ->
+      case Hl of
+        [] -> baddowhile_bgn;
+        _Other ->
+          case element(1, Hl) of
+            ggoto ->
+              A=element(2, Hl),
+              Modify=#{what=>ggoto, ngoto=> A+1},
+              NewEl=#{what=>dowhile_, ngoto=> A+1},
+              tc(maps:put(N, NewEl, maps:put(A, Modify, M)), Tl, T, N+1);
+            _WrongDo ->
+              baddowhile
+          end
+      end;
+    "?" ->
+      case Hl of
+        [] -> badwhile_bgn;
+        _Other_ ->
+          case element(1, Hl) of
+            while_ ->
+              A=element(2, Hl),
+              Modify=#{what=> while_, ngoto=> N+1},
+              NewEl=#{what=>ggoto, ngoto=> A},
+              tc(maps:put(N, NewEl, maps:put(A, Modify, M)), Tl, T, N+1);
+            _WrongWh ->
+              badwhile
+          end
+      end;
+    [$?|_OtherWh] ->
+      tc(M, [{while_, N}|Left], T, N+1);
+    _NotCond ->
+      tc(M, Left, T, N+1)
+  end.
+
+
