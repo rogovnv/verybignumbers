@@ -23,10 +23,12 @@
 
 %% -define(SERVER, ?MODULE).
 
--record(ch_state, {stop_tcp, sock, lsock, dir, part, bbord, buffer, b_cnt, chunk_cnt, help, response, main1, main2, head, boundary, fbgn, form_data, ftype, fname, th_data, overheap}).
+-record(ch_state, {stop_tcp, sock, clen, left_data, lsock, dir, bbord, buffer, b_cnt, chunk_cnt, help, response, main1, main2, head, boundary, fbgn, form_data, ftype, fname, th_data, overheap}).
 
 %% stop_tcp 
 %% ch_state:
+%% clen regext content len
+%% left_data rest of clen data
 %% sock accepted socket
 %% lsock listen socket
 %% dir working directory, gets data from doit.txt 
@@ -35,7 +37,6 @@
 %% %% l foo
 %% %% k 2022-10-10-10-10-59-33
 %% %% s bar
-%% part partitioned data
 %% bbord boundary string
 %% l-ist returns to aout.txt in Dir
 %% buffer The buffer
@@ -79,7 +80,7 @@ init([Sock, Wdir, Cite]) ->
   Header="HTTP/1.1 200 OK\r\n Content-Type: text/html, charset=utf-8\r\n Connection: Close \r\nContent-Length: ",
   A=lists:flatten("<!DOCTYPE html>\r\n<html>\r\n <head>\r\n  <meta charset="++[Sq]++"utf-8"++[Sq]++">\r\n  <title>Calculator.Main_page</title>\r\n </head>\r\n <body>\r\n  <br>\r\n  <p>\r\n  <b>\r\n   File name for handling OR Task ID for result \r\n  </b>\r\n  </p>\r\n  <form enctype="++[Sq]++"multipart/form-data"++[Sq]++" method="++[Sq]++"post"++[Sq]++">\r\n   <input type="++[Sq]++"file"++[Sq]++" formmethod="++[Sq]++"post"++[Sq]++" name="++[Sq]++"File"++[Sq]++">\r\n   <input type="++[Sq]++"submit"++[Sq]++" value="++[Sq]++"Post File"++[Sq]++">\r\n  </form>\r\n  <br>\r\n  <form enctype="++[Sq]++"text/plain"++[Sq]++" method="++[Sq]++"post"++[Sq]++">\r\n   <input type="++[Sq]++"text"++[Sq]++" name="++[Sq]++"Task ID"++[Sq]++">\r\n   <input type="++[Sq]++"submit"++[Sq]++" value="++[Sq]++"Send Task ID"++[Sq]++">\r\n  </form>\r\n  <br>\r\n	"),
   B=lists:flatten("<p>\r\n   <a href="++[Sq]++"/info.html"++[Sq]++">INFO</a>\r\n  </p>\r\n </body>\r\n</html>\r\n"),
-  {ok, afterinit, #ch_state{lsock=Sock, dir=Wdir, main1 = A, main2= B, help =Cite, part=false, bbord=[], stop_tcp=false, head=Header}, {next_event, internal, []}}.
+  {ok, afterinit, #ch_state{lsock=Sock, dir=Wdir, main1 = A, main2= B, help =Cite, bbord=[], stop_tcp=false, head=Header, chunk_cnt=0, buffer=[]}, {next_event, internal, []}}.
 
 %% @private
 %% @doc This function is called by a gen_statem when it needs to find out
@@ -100,6 +101,7 @@ format_status(_Opt, [_PDict, _StateName, _State]) ->
 %% gen_statem receives an event from call/2, cast/2, or as a normal
 %% process message, this function is called.
 handle_event(internal, [], afterinit, State) ->
+  {ok, Clen}=re:compile("[C|c]ontent-[L|l]ength: [0-9]+"),
   {ok, Bound}=re:compile("[B|b]oundary=[\-]+[0-9]+"), %% find boundary data
   {ok, Type}=re:compile("[C|c]ontent-[T|t]ype: text"), %% file type
   {ok, F_begin}=re:compile("[C|c]ontent-[T|t]ype: text\/[a-z|A-Z|\-]+\\r\\n\\r\\n"), %% file begins
@@ -109,7 +111,7 @@ handle_event(internal, [], afterinit, State) ->
     foll_down ->
       keep_state_and_data;
     hold_it ->
-      {next_state, req, State#ch_state{part=false, overheap=false, boundary=Bound, ftype=Type, fbgn=F_begin, form_data=Form_data, fname=Fname}, {next_event, internal, connect}}
+      {next_state, req, State#ch_state{overheap=false, boundary=Bound, ftype=Type, fbgn=F_begin, form_data=Form_data, fname=Fname, clen=Clen}, {next_event, internal, connect}}
     end;
 
 handle_event(internal, connect, req, State) ->
@@ -117,7 +119,7 @@ handle_event(internal, connect, req, State) ->
   Socket=gen_tcp:accept(Lsock, 3),
   case Socket of
     {ok, Sock} ->
-      {keep_state, State#ch_state{sock=Sock}};
+      {keep_state, State#ch_state{sock=Sock, chunk_cnt=0, buffer=[]}};
     {error, timeout} ->
       {keep_state_and_data, {next_event, internal, connect}};
     _Error ->
@@ -132,28 +134,26 @@ handle_event(cast, overheapoff, _S, State) ->
 
 handle_event(internal, response, req, State) ->
   #ch_state{response = R, sock=S}=State,
-  case State#ch_state.part of
-    true ->
-      {next_state, req, State};
-    false ->
-      gen_tcp:send(S, R),
-      gen_tcp:close(S),
-      case g_repo:inet_box_status() of
-        hold_it ->
-          {keep_state, State#ch_state{response = []}, {next_event, internal, connect}};
-        foll_down ->
-          keep_state_and_data
-      end
+  gen_tcp:send(S, R),
+  gen_tcp:close(S),
+  case g_repo:inet_box_status() of
+    hold_it ->
+      {keep_state, State#ch_state{response = []}, {next_event, internal, connect}};
+    foll_down ->
+      keep_state_and_data
 end;
   
 handle_event(info, {tcp_closed, Sock}, req, #ch_state{sock=Sock}=State) ->
   case g_repo:inet_box_status() of
     hold_it ->
-      gen_tcp:close(Sock),
-      {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0}, {next_event, internal, connect}};
+      State#ch_state.sock/=undefined andalso gen_tcp:close(Sock),
+      {keep_state, State#ch_state{bbord = [], buffer = [], chunk_cnt = 0}, {next_event, internal, connect}};
     foll_down ->
-      {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0}}
+      {keep_state, State#ch_state{bbord = [], buffer = [], chunk_cnt = 0}}
   end;
+
+handle_event(info, {tcp_closed, _Sock}, req, _State) ->
+  keep_state_and_data;
 
 handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $i, $n, $f, $o|_T]}, req, #ch_state{sock=Sock}=State) ->
   #ch_state{help = Help, head=Header}=State,
@@ -161,14 +161,14 @@ handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $i, $n, $f, $o|_T]}, req, #c
   L=io_lib:fwrite("~ts", [Fle]),
   B=unicode:characters_to_binary(lists:flatten(L)),
   H=io_lib:fwrite("~s~p~s~s", [Header, size(B),list_to_binary("\r\n\r\n"), B]),
-  {keep_state, State#ch_state{response=H, part=false}, {next_event, internal, response}};
+  {keep_state, State#ch_state{response=H, chunk_cnt=0}, {next_event, internal, response}};
 
 handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $f, $a, $v, $i, $c, $o|_T]}, req, #ch_state{sock=Sock}=State) ->
-  {keep_state, State#ch_state{part=false, response = unicode:characters_to_binary("200 OK")}, {next_event, internal, response}};
+  {keep_state, State#ch_state{chunk_cnt=0, response = unicode:characters_to_binary("200 OK")}, {next_event, internal, response}};
 
 handle_event(cast, stop, _S, State) ->
   g_repo:inet_box_status(foll_down),
-  gen_tcp:close(State#ch_state.sock),
+  State#ch_state.sock/=undefined andalso gen_tcp:close(State#ch_state.sock),
   {stop, normal, State};
 
 handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $a, $d, $m, $i, $n|_T]}, req, #ch_state{sock=Sock}=State) ->
@@ -186,12 +186,12 @@ handle_event(info, {tcp, Sock, [$G, $E, $T, 32, $/, $a, $d, $m, $i, $n|_T]}, req
       A=unicode:characters_to_binary(M1++io_lib:fwrite("~p", [Error])++M2),
       io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A])
   end,
-  {keep_state, State#ch_state{part=false, buffer=[], chunk_cnt = 0, response=Res}, {next_event, internal, response}};
+  {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=Res}, {next_event, internal, response}};
 
 handle_event(info, {tcp, Sock, [$G, $E, $T|_T]}, req, #ch_state{sock=Sock}=State) ->
   #ch_state{head=H, main1=M1, main2=M2}=State,
   M=unicode:characters_to_binary(M1++M2),
-  {keep_state, State#ch_state{response=io_lib:fwrite("~s~p~s~s", [list_to_binary(H), size(M), list_to_binary("\r\n\r\n"), M]), part=false}, {next_event, internal, response}};
+  {keep_state, State#ch_state{response=io_lib:fwrite("~s~p~s~s", [list_to_binary(H), size(M), list_to_binary("\r\n\r\n"), M]), chunk_cnt=0}, {next_event, internal, response}};
 
 handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}=State) ->
   #ch_state{overheap=OHp, head=H, main1=M1, main2=M2}=State,
@@ -202,10 +202,14 @@ handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}
     false -> %% common data match
       case Form_data of %% is form data
         nomatch -> %% file
+          {match, [{Bgclen, Lnclen}]}=re:run(Data, State#ch_state.clen), %%content len
+          Clen=lists:sublist(Data, Bgclen+1, Lnclen),
+          {match, [{Q, W}]}=re:run(Clen, "[0-9]+"),
+          Clen_data=lists:sublist(Clen, Q+1, W),
           {match, [{Bg, Ln}]}=re:run(Data, State#ch_state.fname), %% fname TH
           Fname=lists:sublist(Data, Bg+11, Ln-10),
           F_begin=re:run(Data, State#ch_state.fbgn),
-          BoundaryWhere=re:run(Data, State#ch_state.boundary), %% boundary
+          BoundaryWhere=re:run(Data, State#ch_state.boundary), %% boundary is [-]+[0-9]+
           Boundary= case BoundaryWhere of
             nomatch ->
               [];
@@ -230,10 +234,17 @@ handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}
                   TH_struct=#{addr=>Addr, fname=>Fname, tid=>Tid},
                   case N of
                     2 -> %% file > MTU
-                      M1=maps:new(),
-                      M2=maps:put(1, lists:sublist(Data, Bgn+Offs+1, length(Data)-Bgn-Offs), M1),
+                      Mp1=maps:new(),
+                      %% Chunk=lists:sublist(Data, Bgn+Offs+1, length(Data)-Bgn-Offs),
+                      Chunk=lists:subtract(Data, lists:sublist(Data, Bgn+Offs)),
+                      Mp2=maps:put(1, Chunk, Mp1),
                       inet:setopts(Sock, [list, {active, once}]),
-                      {keep_state, State#ch_state{th_data = TH_struct, bbord=Bbord, chunk_cnt = 1, buffer = M2, part=true, response=[]}};
+                      Clean_b=re:replace(Bbord, "-", "", [global, {return, list}]),
+                      {match, [{U, _V}]}=re:run(Data, "\r\n[-]+"++Clean_b),
+                      %% [{Strt_chunk, _}]=tl(lists:flatten(N_of)),
+                      %% {QQ, Data_chunk}=lists:split(Strt_chunk, Data),
+                      Left_data=list_to_integer(Clen_data)-size(list_to_binary(lists:sublist(Data, U+3, length(Data)-U-2))),%% and --
+                      {keep_state, State#ch_state{th_data = TH_struct, bbord=Bbord, chunk_cnt = 1, buffer = Mp2, response=[], left_data=Left_data}, {timeout, 3000, conn_close}}; %% 
                     3 ->%% small file
                       case OHp of
                         false ->
@@ -251,20 +262,20 @@ handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}
                         true -> %% overheap detected
                           O=unicode:characters_to_binary(M1++"OVERHEAP"++M2),
                           D=io_lib:fwrite("~s~p~s~s", [H, size(O), list_to_binary("\r\n\r\n"), O]),
-                          {keep_state, State#ch_state{th_data = [], b_cnt=0, chunk_cnt = 0, buffer=[], part=false, response = D}, {next_event, internal, response}}
+                          {keep_state, State#ch_state{th_data = [], b_cnt=0, chunk_cnt = 0, buffer=[], response = D}, {next_event, internal, response}}
                         end;
                     _Other -> 
                       ok,
                       A=unicode:characters_to_binary(M1++"WRONG DATA"++M2),
                       Dd=io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A]),
-                      {keep_state, State#ch_state{part=false, buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
+                      {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
                     end
               end;
             true ->
               ok,
               A=unicode:characters_to_binary(M1++"WRONG DATA"++M2),
               Dd=io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A]),
-              {keep_state, State#ch_state{part=false, buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
+              {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
           end;
         _FormData -> %% form data: get result
           FormD=re:run(Data, State#ch_state.form_data),
@@ -273,39 +284,43 @@ handle_event(info, {tcp, Sock, [$P, $O, $S, $T|Data]}, req, #ch_state{sock=Sock}
               [_, Tid]=string:split(lists:sublist(Data, Pos+1, Len), "="),
               Answer=unicode:characters_to_binary(M1++io_lib:fwrite("~p", [g_repo:answer(Tid)])++M2),
               Db=io_lib:fwrite("~s~p~s~s", [H, size(Answer), list_to_binary("\r\n\r\n"), Answer]),
-              {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0, response = Db}, {next_event, internal, response}};
+              {keep_state, State#ch_state{bbord = [], buffer = [], chunk_cnt = 0, response = Db}, {next_event, internal, response}};
             _OtherData ->
               DOth=iolist_to_binary("Wrong Data"),
-              {keep_state, State#ch_state{part=false, bbord = [], buffer = [], chunk_cnt = 0, response = DOth}, {next_event, internal, response}}
+              {keep_state, State#ch_state{bbord = [], buffer = [], chunk_cnt = 0, response = DOth}, {next_event, internal, response}}
             end
         end;
     true -> %% no match common data
       ok,
       A=unicode:characters_to_binary(M1++"WRONG DATA"++M2),
       Dd=io_lib:fwrite("~s~p~s~s", [H, size(A), list_to_binary("\r\n\r\n"), A]),
-      {keep_state, State#ch_state{part=false, buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
+      {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=Dd}, {next_event, internal, response}}
     end;
 
-handle_event(info, {tcp, Sock, Data}, req, #ch_state{sock=Sock}=State) ->
-  #ch_state{chunk_cnt = C_cnt, buffer=Buffer, th_data = TH_struct, overheap = OHp, bbord=Bbord, head=H, main1=M1, main2=M2}=State,
-  Bound=re:run(Data, Bbord),
-  case Bound of
-    nomatch -> %% not the end yet
-      Bool=State#ch_state.part==true,
-      case Bool of
-        true -> %% parted file
-          inet:setopts(Sock, [list, {active, once}]),
-          {keep_state, State#ch_state{buffer=maps:put(C_cnt+1, Data, Buffer), chunk_cnt = C_cnt+1, response=[]}};
-        false -> 
-          {keep_state, State#ch_state{response = io_lib:fwrite("~s~p~s~s", [H, size(M1)+size(M2), M1, M2])}, {next_event, internal, response}}
-      end;
-    {match, [{_Point, _Len}]} -> %% end of file Point
+handle_event(info, {tcp, Sock, Data}, req, #ch_state{sock=Sock, chunk_cnt=Ctn}=State) when Ctn >0 ->
+  {keep_state, State, {next_event, internal, {parted, Data}}};
+
+handle_event(internal, {parted, _Data}, req, #ch_state{chunk_cnt=Ctn}=State) when Ctn>100 ->
+  #ch_state{main1=M1, main2=M2, head=H}=State,
+  {keep_state, State#ch_state{chunk_cnt=0, buffer=[], response = io_lib:fwrite("~s~p~s~s", [H, size(M1)+size(M2), M1, M2])}, {next_event, internal, response}};
+
+handle_event(internal, {parted, Data}, req, State) ->
+  #ch_state{chunk_cnt = C_cnt, buffer=Buffer, left_data=Left_data, th_data = TH_struct, overheap = OHp, bbord=Bbord, head=H, main1=M1, main2=M2, sock=Sock}=State,
+  L_dta=Left_data-size(list_to_binary(Data)),
+  BoolD=L_dta>0,
+  case BoolD of
+    true -> %% not the end yet
+      inet:setopts(Sock, [list, {active, once}]),
+      {keep_state, State#ch_state{buffer=maps:put(C_cnt+1, Data, Buffer), chunk_cnt = C_cnt+1, response=[], left_data=L_dta}, {timeout, 3000, conn_close}}; %% 
+    false -> %% end of file Point
+      Rm=maps:get(C_cnt, Buffer)++Data,
+      [Med|_Other]=string:split(Rm, Bbord),
+      Buf=maps:put(C_cnt, Med, maps:remove(C_cnt, Buffer)),
       case OHp of %% overheap
         false ->
           Tid=maps:get(tid, TH_struct),
-          [Chunk, _]=string:split(Data, State#ch_state.bbord), 
-          Buf=maps:put(C_cnt+1, Chunk, Buffer),
-          Whole=lists:flatten(maps:fold(fun(_Key, L, Acc) -> [L|Acc] end, [], Buf)),
+          Seq=lists:seq(1, maps:size(Buf)),
+          Whole=lists:flatten([maps:get(X, Buf) || X <- Seq]),
           Sup_struct=#{
           id=>Tid,
           start => {task_handler, start_link, [{TH_struct, Whole}]},
@@ -320,7 +335,15 @@ handle_event(info, {tcp, Sock, Data}, req, #ch_state{sock=Sock}=State) ->
           D=io_lib:fwrite("~s~p~s~s", [H, size(O), list_to_binary("\r\n\r\n"), O]),
           {keep_state, State#ch_state{chunk_cnt = 0, b_cnt = 0, th_data = [], buffer = [], response =D}, {next_event, internal, response}}
       end
-  end.
+  end;
+
+handle_event(info, {tcp, Sock, _Data}, req, #ch_state{sock=Sock}=State) ->
+  gen_tcp:close(Sock),
+  {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=0, b_cnt=0, th_data=[]}, {next_event, internal, connect}};
+
+handle_event(timeout, conn_close, req, State) ->
+  gen_tcp:close(State#ch_state.sock),
+  {keep_state, State#ch_state{buffer=[], chunk_cnt = 0, response=0, b_cnt=0, th_data=[]}, {next_event, internal, connect}}.
 
 %% @private
 %% @doc This function is called by a gen_statem when it is about to
