@@ -54,26 +54,52 @@ start(_StartType, _StartArgs) -> %% /priv/conn_conf must have
       Data=binary:bin_to_list(Bin),
       L=string:split(Data, "\n", all),
       Params=lists:map(Fn, L),
-      Wdir=element(2,lists:keyfind("wdir", 1, Params)),
-      Port=list_to_integer(element(2, lists:keyfind("port" , 1, Params))),
-      Conns=list_to_integer(element(2, lists:keyfind("conns", 1, Params))),
-      Maxmem=list_to_integer(element(2, lists:keyfind("maxmem", 1, Params))),
-      Bool=(Wdir==false) andalso (Port==false) andalso (Conns==false) andalso (Maxmem==false),
+      Wdir=proplists:get_value("wdir", Params, nop),
+      Pdata=proplists:get_value("port", Params, nop),
+      Port=case Pdata of
+        nop ->
+          nop;
+        Pdata ->
+          list_to_integer(Pdata)
+        end,
+      Cdata=proplists:get_value("conns", Params, nop),
+      Conns=case Cdata of
+        nop ->
+          nop;
+        Cdata ->
+          list_to_integer(Cdata)
+        end,
+      Mdata=proplists:get_value("maxmem", Params, nop),
+      Maxmem=case Mdata of
+        nop ->
+          nop;
+        Mdata ->
+          list_to_integer(Mdata)
+        end,
+      Bool=(Wdir/=nop) andalso (Port/=nop) andalso (Conns/=nop) andalso (Maxmem/=nop),
       case Bool of
-        false ->
-          case top_sup:start_link([{Wdir, Port, Conns, Maxmem, Fle}]) of
+        true ->
+          Wdirr=case lists:nth(length(Wdir), Wdir) of
+            $/ ->
+              lists:sublist(Wdir, length(Wdir)-1);
+            _Else ->
+              Wdir
+            end,
+          case top_sup:start_link([{Wdirr, Port, Conns, Maxmem, Fle}]) of
             {ok, Pid} ->
               file:write_file(Path++"/err.log", "top_sup started"),
               {ok, Pid};
             Error ->
-              file:write_file(Path++"/err.log", "top_sup error "++io_lib:fwrite("~p", [Error]))
+              file:write_file(Path++"/err.log", "top_sup error "++io_lib:fwrite("~p", [Error])),
+              exit(self(), kill)
           end;
-        true ->
-          file:write_file(Path++"/err.log", "no params in /priv/conn_conf")
+        false ->
+          file:write_file(Path++"/err.log", "no params in /priv/conn_conf"),
+          exit(self(), kill)
       end;
     Other ->
       file:write_file(Path++"/err.log", "no file /priv/conn_conf "++io_lib:fwrite("~p", [Other])),
-      Other
+      exit(self(), kill)
   end.
 
 %%--------------------------------------------------------------------

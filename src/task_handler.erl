@@ -99,10 +99,17 @@ extract(internal, [], State) ->
       Lines=trace_conds([H|T]), %% #{key:stringpos, {while_|dowhile_|ggoto}}
       case is_map(Lines) of
         true ->  {next_state, condt, {State#th_state{fdata=T, vp=VarPid, range=Rp, aout=ALst}, Lines, 1, 0}, {next_event, internal, H}};
-        false -> {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Lines}}}
+        false -> 
+          D={State#th_state.tid, State#th_state.addr, State#th_state.fname, {error, Lines}},
+          g_repo:aout(D),
+          keep_state_and_data
+          %% {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Lines}}}
       end;
     {true, true} ->
-      {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, {no_range, no_aout}}}};
+      D={State#th_state.tid, State#th_state.addr, State#th_state.fname, {error, {no_range, no_aout}}},
+      g_repo:aout(D),
+      keep_state_and_data;
+      %% {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, {no_range, no_aout}}}};
     _Other ->
       Answer=case element(1, Bool) of
                true ->
@@ -110,7 +117,10 @@ extract(internal, [], State) ->
                false ->
                  no_aout
              end,
-      {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Answer}}}
+      D={State#th_state.tid, State#th_state.addr, State#th_state.fname, {error, Answer}},
+      g_repo:aout(D),
+      keep_state_and_data
+      %% {next_state, errhandle, {State, [], 0, 0}, {next_event, internal, {error, Answer}}}
   end;
 
 extract(cast, stop, State) ->
@@ -178,7 +188,15 @@ condt(internal, [$?, $?|Str], {State, Lines, Cnt, Pcnt}) ->%% dowhile
           Pos=maps:get(ngoto, CurPos),
           NewEl=#{what => dowhile_, var1 => Var1, var2 => Var2, op => C, ngoto => Pos},
           NewLines=maps:put(Cnt, NewEl, maps:remove(Cnt, Lines)),
-          BoolVar=var:is_existv(State#th_state.vp, Var1) andalso var:is_existv(State#th_state.vp, Var2),
+          V1=case var:is_existv(State#th_state.vp, Var1) of
+            true -> true;
+            _Or1 -> false
+          end,
+          V2=case var:is_existv(State#th_state.vp, Var2) of
+            true -> true;
+            _Or2 -> false
+          end,
+          BoolVar=V1 andalso V2,
           case BoolVar of
             true ->
               case Is_cond of
@@ -225,7 +243,15 @@ condt(internal, [$?|Str], {State, Lines, Cnt, Pcnt}) ->%% while
           Pos=maps:get(ngoto, CurPos),
           NewEl=#{what => while_, var1 => Var1, var2 => Var2, op => C, ngoto => Pos},
           NewLines=maps:put(Cnt, NewEl, maps:remove(Cnt, Lines)),
-          BoolVar=var:is_existv(State#th_state.vp, Var1) andalso var:is_existv(State#th_state.vp, Var2),
+          V1=case var:is_existv(State#th_state.vp, Var1) of
+            true -> true;
+            _Else1 -> false
+          end,
+          V2=case var:is_existv(State#th_state.vp, Var2) of
+            true -> true;
+            _Else2 -> false
+          end,
+          BoolVar=V1 andalso V2,
           case BoolVar of
             true ->
               case Is_cond of
@@ -401,26 +427,12 @@ start_calc(cast, stop, State) ->
 start_calc(info, {'EXIT', _, _}, State) ->
   {stop, shutdown, State}.
 
-errhandle(internal, Data, {State, _Lines, _Cnt, _Pnt}) ->
+errhandle(internal, Data, {State, Lines, Cnt, _Pnt}) ->
   D={State#th_state.tid, State#th_state.addr, State#th_state.fname, Data},
   g_repo:aout(D),
-  keep_state_and_data;
-
-errhandle(cast, stop, State) ->
-  {stop, normal, State};
-
-errhandle(info, {'EXIT', _, _}, State) ->
-  {stop, shutdown, State}.
-
-%% @private
-%% @doc This function is called by a gen_statem when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any
-%% necessary cleaning up. When it returns, the gen_statem terminates with
-%% Reason. The return value is ignored.
-terminate(_Reason, Staten, {State, Lines, Cnt, _Pcnt}) ->
-  Bool=lists:member(Staten, [errhandle, start_calc, expression, condt, calc_stage]),
-  case Bool of
-    true ->
+  %% Bool=lists:member(Staten, [errhandle, start_calc, expression, condt, calc_stage]),
+  %% case Bool of
+  %%   true ->
       F=fun(El) ->
         W=maps:get(what, El),
         case W of
@@ -440,16 +452,32 @@ terminate(_Reason, Staten, {State, Lines, Cnt, _Pcnt}) ->
           _Other ->
             ok
         end
-        end,
+      end,
       case Cnt of
         0 -> ok;
-        _Other -> [F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)]
-      end;
-    false ->
-      ok
-  end,
+        _Other -> 
+          [maps:is_key(X, Lines) andalso F(maps:get(X, Lines))||X <- lists:seq(1, Cnt)]
+      end,
+    %% false ->
+    %%   ok
+  %% end,
   gen_server:cast(State#th_state.vp, stop),
-  ok;
+  keep_state_and_data;
+
+errhandle(cast, stop, State) ->
+  {stop, normal, State};
+
+errhandle(info, {'EXIT', _, _}, State) ->
+  {stop, shutdown, State}.
+
+%% @private
+%% @doc This function is called by a gen_statem when it is about to
+%% terminate. It should be the opposite of Module:init/1 and do any
+%% necessary cleaning up. When it returns, the gen_statem terminates with
+%% Reason. The return value is ignored.
+%% terminate(_Reason, Staten, {State, Lines, Cnt, _Pcnt}) ->
+  
+%%   ok;
 terminate(_Reason, _State, _Data) ->
   ok.
 

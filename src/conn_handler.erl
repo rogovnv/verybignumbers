@@ -302,7 +302,7 @@ handle_event(info, {tcp, Sock, Data}, req, #ch_state{sock=Sock, chunk_cnt=Ctn}=S
 
 handle_event(internal, {parted, _Data}, req, #ch_state{chunk_cnt=Ctn}=State) when Ctn>100 ->
   #ch_state{main1=M1, main2=M2, head=H}=State,
-  {keep_state, State#ch_state{chunk_cnt=0, buffer=[], response = io_lib:fwrite("~s~p~s~s", [H, size(M1)+size(M2), M1, M2])}, {next_event, internal, response}};
+  {keep_state, State#ch_state{chunk_cnt=0, buffer=[], response = io_lib:fwrite("~s~p~s~s", [H, size(list_to_binary(M1++M2)), M1, M2])}, {next_event, internal, response}};
 
 handle_event(internal, {parted, Data}, req, State) ->
   #ch_state{chunk_cnt = C_cnt, buffer=Buffer, left_data=Left_data, th_data = TH_struct, overheap = OHp, bbord=Bbord, head=H, main1=M1, main2=M2, sock=Sock}=State,
@@ -369,8 +369,8 @@ admin_list(L, Dir) ->
 admin_list([], _dir, []) -> "ok";
 admin_list([], _Dir, Acc) -> Acc;
 admin_list([H|T], Dir, Acc) ->
-  [Key|V]=string:split(re:replace(H, "  ", " ", [{return, list}]), " "),
-  Value=re:replace(V, "[\s|\n|\r|\t]+", "", [global]),
+  [Key|V]=string:split(H, " "),
+  Value=re:replace(V, "[\s|\n|\r|\t]+", "", [global, {return, list}]),
   case Key of %% d-elete, f-ile, k-ill all, l-ist all, m-emory, s-top prog all
     "d" ->
       Is_has=supervisor:get_childspec(th_sup, Value),
@@ -384,13 +384,13 @@ admin_list([H|T], Dir, Acc) ->
           admin_list(T, Dir, [{d, ok, Value}|Acc]) 
       end;
     "f" ->
-      File=file:read_file(Dir++Value),
+      File=file:read_file(Value),
       case File of
         {ok, Bin} ->
           Data=binary:bin_to_list(Bin),
           Num=g_repo:get_num(),
-          {{Y, M, D}, {H, Min, S}}=calendar:local_time(),
-          Tid=lists:flatten([integer_to_list(Y), $-, integer_to_list(M), $-, integer_to_list(D), $-,integer_to_list(H), $-, integer_to_list(Min), $-, integer_to_list(S), $-, integer_to_list(Num)]),
+          {{Y, M, D}, {Hr, Min, S}}=calendar:local_time(),
+          Tid=lists:flatten([integer_to_list(Y), $-, integer_to_list(M), $-, integer_to_list(D), $-,integer_to_list(Hr), $-, integer_to_list(Min), $-, integer_to_list(S), $-, integer_to_list(Num)]),
           TH_struct=#{addr=> {"localhost"}, fname => Value, tid => Tid},
           Sup_struct=#{
           id => Tid,
@@ -410,13 +410,13 @@ admin_list([H|T], Dir, Acc) ->
     "l" ->
       L=supervisor:which_children(th_sup),
       Aout=[{Id, process_info(Pid, memory), g_repo:answer(Id)}||{Id, Pid, _, _}<- L],
-      To_file=iolist_to_binary(io_lib:format("~p~n", [Aout])),
+      To_file=iolist_to_binary(io_lib:format("~p ~p", [Aout, g_repo:getall()])),
       Name=Dir++"/_aout.txt",
       filelib:is_file(Name) andalso file:delete(Name),
       file:write_file(Name, To_file),
       admin_list(T, Dir, [{"aout.txt"}|Acc]);
     "m" ->
-      g_repo:setmaxmem(Value),
+      g_repo:setmaxmem(list_to_integer(Value)),
       admin_list(T, Dir, [{"mem"}|Acc]);
     "s" ->
       top_sup:stop();

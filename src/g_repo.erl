@@ -22,7 +22,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
   code_change/3]).
 
--export([get_num/0, answer/1, setmaxmem/1, aout/1, inet_box_status/0, inet_box_status/1]).
+-export([get_num/0, answer/1, setmaxmem/1, aout/1, inet_box_status/0, inet_box_status/1, getall/0]).
 
 -define(SERVER, ?MODULE).
 
@@ -75,6 +75,9 @@ handle_call(get_num, _From, #gr_state{hour=H, num=N}=State) ->
 
 handle_call(inet_box, _From, #gr_state{inet_box = InetBox}=State) ->
   {reply, InetBox, State};
+
+handle_call(getall, _From, #gr_state{repo=Repo}=State) ->
+  {reply, Repo, State};
 
 handle_call({answer, Tid}, _From, #gr_state{repo=Repo}=State) ->
   Bool=maps:is_key(Tid, Repo),
@@ -183,7 +186,7 @@ answer(Tid) ->
   gen_server:call(g_repo, {answer, Tid}).
 
 setmaxmem(Mem) ->
-  gen_server:cast(g_repo, Mem).
+  gen_server:cast(g_repo, {maxmem, Mem}).
 
 aout(Answer) ->
   gen_server:cast(g_repo, {aout, Answer}).
@@ -193,3 +196,6 @@ inet_box_status() ->
 
 inet_box_status(Data) ->
   gen_server:cast(g_repo, {inet_box, Data}).
+
+getall() ->
+  gen_server:call(g_repo, getall).

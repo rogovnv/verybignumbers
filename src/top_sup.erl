@@ -66,5 +66,5 @@ init([{Wdir, Port, Conns, Maxmem, Fle}]) ->
 
 stop() ->
   right_all_sup:stop(),
-  timer:sleep(2000),
-  application:stop(base_calc).
+  timer:sleep(500),
+  init:stop().

@@ -20,8 +20,8 @@ callback_mode() ->
 start({VarPid, StringId, MPid}) ->
   gen_statem:start(?MODULE, {VarPid, StringId, MPid}, []).
 
-terminate(_Reason, _State, _Data) ->
-
+terminate(_Reason, _State, {Str, _SId, _VarPid, _MP}) ->
+  clear_data(lists:reverse(Str)),
   ok.
 
 init({VarPid, SId, MP}) ->
@@ -190,6 +190,8 @@ get_rbr([$)|T], Num, _Aout) -> get_rbr(T, Num+1, Num);
 get_rbr([_H|T], Num, Aout) -> get_rbr(T, Num+1, Aout);
 get_rbr([], _Num, Aout) -> Aout.
 
+clear_data([]) ->
+  ok;
 clear_data({What, A}) ->
   case What of
     f ->
@@ -202,7 +204,9 @@ clear_data([{What, A}|T]) ->
       A ! stop;
     _Any -> ok
   end,
-  clear_data([T]).
+  clear_data([T]);
+clear_data([_Any|T]) ->
+  clear_data(T).
 
 get_answer(Pid) ->
   My=self(),
