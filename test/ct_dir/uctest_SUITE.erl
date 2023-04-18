@@ -455,7 +455,7 @@ timeouted(Config) ->
 
 %%%%%%%%%% ADMIN
 %% [{f,"/media/download/bc/long_generated.txt","2023-4-14-20-38-16-5"}, {f,"/media/download/base_calc-1.0.0/test/generated.txt", "2023-4-14-20-38-16-4"}]
-test_five(Config) ->%% f-ile l-ist d-elete k-illall m-emory
+test_five(Config) ->%% f-ile l-ist d-elete k-illall m-emory s-top
     Fle="R=2 A=(F)\nF=0\n"++lists:flatten(lists:duplicate(500, "F=F+1\n")),
     Rge=["10", "20", "30", "40"],
     Pi="R=6 A=(ACC CUR MED)\nACC=4\nCUR=3\nSIGN=-1\nMED=100\nNULL=0\n?MED<>NULL\n\tMED=(4/CUR)*SIGN\n\tACC=ACC+MED\n\tSIGN=SIGN*-1\n\tCUR=CUR+2\n?\n\ncalculates Pi with precision 6 digits abt 3 minutes",
@@ -567,6 +567,8 @@ test_five(Config) ->%% f-ile l-ist d-elete k-illall m-emory
             closed
     end,
     ?assert(F9==closed),
+    [file:delete(?config(wdir, Config)++Nme)||Nme<-Rge],
+    file:delete(?config(wdir, Config)++"50"),
     Config.
 
 %% ct:run_test([{spec, "/media/download/base_calc-1.0.0/test/ct_dir/uctest.spec"}]).
