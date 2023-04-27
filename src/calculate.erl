@@ -168,6 +168,7 @@ ex(Str, LBr, C) ->
 
 u_minus([A, $-, {What, B}|T], Acc, What, VarPid) when A == $= orelse A == $- orelse A == $+ orelse A == $* orelse A == $/ orelse A == $( orelse A == $= ->
   S=spawn(bfun, uminus, [{{What, B}, VarPid}]),
+  var:add_pid(VarPid, S),
   u_minus(T, [{f, S}, A|Acc], What, VarPid);
 u_minus([A|T], Acc, What, VarPid) -> u_minus(T,[A|Acc], What, VarPid);
 u_minus([], Acc, _What, _VarPid) -> lists:reverse(lists:flatten([Acc])).
@@ -176,10 +177,12 @@ chg_pair([{X, A}, Sym, {Y, B}|T], Sym, Acc, VarPid, Range) ->
   S=case Sym of
       $- ->
         Med=spawn(bfun, uminus, [{{Y, B}, VarPid}]),
+		var:add_pid(VarPid, Med),
         spawn(bfun, bfun, [{{X, A}, {f, Med}, VarPid, $+, Range}]);
       _Other ->
         spawn(bfun, bfun, [{{X, A}, {Y, B}, VarPid, Sym, Range}])
     end,
+	var:add_pid(VarPid, S),
   chg_pair(T, Sym, [{f,S}|Acc], VarPid, Range);
 chg_pair([H|T], Sym, Acc, VarPid, Range) ->
   chg_pair(T, Sym, [H|Acc], VarPid, Range);
@@ -221,6 +224,7 @@ reverse_minus(L, VP) ->
 
 rm_([{X, Y}, $-,{A, B}|L], VP, Acc) ->
   S=spawn(bfun, uminus, [{{A, B}, VP}]),
+  var:add_pid(VP, S),
   rm_([{f, S}|L], VP, [$+, {X, Y}|Acc]);
 rm_([Data|L], VP, Acc) ->
   rm_(L, VP, [Data|Acc]);
@@ -232,6 +236,7 @@ reverse_division(L, VP, Range) ->
 
 rd_([{X, Y}, $/, {A, B}|L], VP, Acc, Range) ->
   S=spawn(bfun, bfun, [{{n, Range}, {A, B}, VP, $/, Range}]),
+  var:add_pid(VP, S),
   rd_([{f, S}|L], VP, [$*, {X, Y}|Acc], Range);
 rd_([Data|L], VP, Acc, Range) ->
   rd_(L, VP, [Data|Acc], Range);

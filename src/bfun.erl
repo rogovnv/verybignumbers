@@ -55,16 +55,17 @@ bfun({{A, B}, {C, D}, VarPid, Op, Range}) ->
     stop ->
       if
         A==f ->
-          B ! stop;
-        true -> ok
+          B ! stop,
+		  exit(normal);
+        true -> exit(normal)
       end,
       if
         C==f ->
-          D ! stop;
-        true -> ok
-      end,
-bfun({{A, B}, {C, D}, VarPid, Op, Range})
-  end.
+          D ! stop,
+		  exit(normal);
+        true -> exit(normal)
+      end
+	end.
 
 uminus({{What, M}, VarPid}) ->
   receive
@@ -84,10 +85,10 @@ uminus({{What, M}, VarPid}) ->
     stop ->
       case What of
         f ->
-          M ! stop;
-        _Other -> ok
-      end,
-      ok;
+          M ! stop,
+		  exit(normal);
+        _Other -> exit(normal)
+      end;
     _Other ->
       uminus({{What, M}, VarPid})
   end.

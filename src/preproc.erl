@@ -189,6 +189,19 @@ oper(internal, _Data, {_VarPid, _Str, _Ins, _Aout, _LRBr, SId, MP}) ->
   gen_server:cast(MP, {SId, {error, oper_bad_number}}),
   keep_state_and_data.
 
+
+rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId, MP}) when Data == $- ->
+  [H|T]=Str,
+  {What, _}=hd(Ins),
+  Bool=H == $v andalso What == v,
+  case Bool of
+    false ->
+      gen_server:cast(MP, {SId, {error, wrong_uminus}}),
+      keep_state_and_data;
+    true -> %% var 
+      {keep_state, {VarPid, T, Ins, [Aout,$-], LRBr, SId, MP}, [{next_event, internal, H}]}
+  end;
+
 rbr(internal, Data, {VarPid, Str, Ins, Aout, LRBr, SId, MP}) when Data == $v ->
   [{A, B}|TI]=Ins,
   Add=case A of
